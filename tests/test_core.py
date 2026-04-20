@@ -424,3 +424,28 @@ class TestDiagnosticMode:
             parse_mame_dir(tmp_path, diagnostic=False)
 
         assert len(caught) == 0
+
+    def test_duplicate_role_in_directory_raises(self, tmp_path):
+        from neoconv.core import parse_mame_dir
+
+        # Both map to role "P" and should be rejected to avoid ambiguity.
+        (tmp_path / "game-p1.bin").write_bytes(make_rom(512 * 1024))
+        (tmp_path / "alt_p1.bin").write_bytes(make_rom(512 * 1024, 0xAB))
+        (tmp_path / "game-s1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-m1.bin").write_bytes(make_rom(128 * 1024))
+
+        with pytest.raises(ValueError, match="Duplicate ROM role"):
+            parse_mame_dir(tmp_path, diagnostic=False)
+
+    def test_duplicate_role_in_zip_raises(self, tmp_path):
+        from neoconv.core import parse_mame_zip
+
+        zip_path = tmp_path / "dupe.zip"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("game-p1.bin", make_rom(512 * 1024))
+            zf.writestr("alt_p1.bin", make_rom(512 * 1024, 0xAB))
+            zf.writestr("game-s1.bin", make_rom(128 * 1024))
+            zf.writestr("game-m1.bin", make_rom(128 * 1024))
+
+        with pytest.raises(ValueError, match="Duplicate ROM role"):
+            parse_mame_zip(zip_path, diagnostic=False)

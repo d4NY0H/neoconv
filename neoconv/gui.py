@@ -72,6 +72,12 @@ def _c_chip_size_from_str(s: str, c_total: int | None = None) -> int:
     return C_CHIP_SIZE_DEFAULT
 
 
+def _set_controls_state(controls: list[tk.Widget], enabled: bool) -> None:
+    state = "normal" if enabled else "disabled"
+    for ctrl in controls:
+        ctrl.config(state=state)
+
+
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
@@ -161,6 +167,7 @@ class _SizeCombo(ttk.Frame):
 class ExtractTab(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
+        self._is_running = False
         self._build()
 
     def _build(self):
@@ -188,11 +195,15 @@ class ExtractTab(ttk.Frame):
         self._out_dir_var = tk.StringVar()
         dir_row = ttk.Frame(out_frame)
         dir_row.grid(row=1, column=1, sticky="ew", padx=4)
-        ttk.Entry(dir_row, textvariable=self._out_dir_var, width=38).pack(side="left", padx=4)
-        ttk.Button(dir_row, text="Browse…",
-                   command=lambda: self._out_dir_var.set(
-                       filedialog.askdirectory() or self._out_dir_var.get())
-                   ).pack(side="left")
+        self._out_dir_entry = ttk.Entry(dir_row, textvariable=self._out_dir_var, width=38)
+        self._out_dir_entry.pack(side="left", padx=4)
+        self._out_dir_button = ttk.Button(
+            dir_row, text="Browse…",
+            command=lambda: self._out_dir_var.set(
+                filedialog.askdirectory() or self._out_dir_var.get()
+            ),
+        )
+        self._out_dir_button.pack(side="left")
         out_frame.columnconfigure(1, weight=1)
 
         # Prefix + format
@@ -212,18 +223,20 @@ class ExtractTab(ttk.Frame):
         self._c_size = _SizeCombo(row2, "C Chip Size:", _C_CHIP_SIZES, "auto (C_total ÷ 2)")
         self._c_size.pack(side="left")
 
-        ttk.Button(self, text="Extract", command=self._run).pack(**pad)
+        self._run_btn = ttk.Button(self, text="Extract", command=self._run)
+        self._run_btn.pack(**pad)
         self._log = _LogBox(self)
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
         self._toggle_out()
 
     def _toggle_out(self):
         is_zip = self._out_mode.get() == "zip"
-        state = "normal" if is_zip else "disabled"
-        self._out_zip.entry.config(state=state)
-        self._out_zip.button.config(state=state)
+        _set_controls_state([self._out_zip.entry, self._out_zip.button], enabled=is_zip)
+        _set_controls_state([self._out_dir_entry, self._out_dir_button], enabled=not is_zip)
 
     def _run(self):
+        if self._is_running:
+            return
         neo_path = Path(self._neo.value)
         if not neo_path.exists():
             messagebox.showerror("Error", f"File not found: {neo_path}"); return
@@ -232,6 +245,8 @@ class ExtractTab(ttk.Frame):
         prefix = self._prefix.get().strip() or neo_path.stem
         fmt    = self._fmt.get()
         self._log.clear()
+        self._is_running = True
+        self._run_btn.config(state="disabled")
 
         def work():
             try:
@@ -262,8 +277,14 @@ class ExtractTab(ttk.Frame):
                 self._log.append("✅ Done.")
             except Exception as e:
                 self._log.append(f"❌ Error: {e}")
+            finally:
+                self.after(0, self._finish_run)
 
         _run_in_thread(work)
+
+    def _finish_run(self):
+        self._is_running = False
+        self._run_btn.config(state="normal")
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +294,7 @@ class ExtractTab(ttk.Frame):
 class PackTab(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
+        self._is_running = False
         self._build()
 
     def _build(self):
@@ -332,11 +354,14 @@ class PackTab(ttk.Frame):
             variable=self._diagnostic,
         ).pack(anchor="w", padx=4, pady=2)
 
-        ttk.Button(self, text="Pack → .neo", command=self._run).pack(**pad)
+        self._run_btn = ttk.Button(self, text="Pack → .neo", command=self._run)
+        self._run_btn.pack(**pad)
         self._log = _LogBox(self)
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
 
     def _run(self):
+        if self._is_running:
+            return
         src = Path(self._inp.value)
         out = Path(self._out.value) if self._out.value else None
         if not src.exists():
@@ -360,6 +385,8 @@ class PackTab(ttk.Frame):
         swap_p     = self._swap_p.get()
         diagnostic = self._diagnostic.get()
         self._log.clear()
+        self._is_running = True
+        self._run_btn.config(state="disabled")
 
         def work():
             try:
@@ -382,8 +409,14 @@ class PackTab(ttk.Frame):
                 self._log.append("✅ Done.")
             except Exception as e:
                 self._log.append(f"❌ Error: {e}")
+            finally:
+                self.after(0, self._finish_run)
 
         _run_in_thread(work)
+
+    def _finish_run(self):
+        self._is_running = False
+        self._run_btn.config(state="normal")
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +426,7 @@ class PackTab(ttk.Frame):
 class VerifyTab(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
+        self._is_running = False
         self._build()
 
     def _build(self):
@@ -417,11 +451,14 @@ class VerifyTab(ttk.Frame):
         self._c_size = _SizeCombo(row2, "C Chip Size:", _C_CHIP_SIZES, "auto (C_total ÷ 2)")
         self._c_size.pack(side="left")
 
-        ttk.Button(self, text="Verify Roundtrip", command=self._run).pack(**pad)
+        self._run_btn = ttk.Button(self, text="Verify Roundtrip", command=self._run)
+        self._run_btn.pack(**pad)
         self._log = _LogBox(self, height=12)
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
 
     def _run(self):
+        if self._is_running:
+            return
         neo_path = Path(self._neo.value)
         if not neo_path.exists():
             messagebox.showerror("Error", f"File not found: {neo_path}"); return
@@ -429,6 +466,8 @@ class VerifyTab(ttk.Frame):
         prefix = self._prefix.get().strip() or neo_path.stem
         fmt    = self._fmt.get()
         self._log.clear()
+        self._is_running = True
+        self._run_btn.config(state="disabled")
 
         def work():
             try:
@@ -444,8 +483,10 @@ class VerifyTab(ttk.Frame):
                 with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tf:
                     tf.write(zip_data)
                     tmp_zip = Path(tf.name)
-                rebuilt = mame_zip_to_neo(tmp_zip, meta)
-                tmp_zip.unlink()
+                try:
+                    rebuilt = mame_zip_to_neo(tmp_zip, meta)
+                finally:
+                    tmp_zip.unlink(missing_ok=True)
                 self._log.append("Step 3: Comparing ROM data regions…")
                 result = verify_roundtrip(original, rebuilt)
                 self._log.append("")
@@ -457,8 +498,14 @@ class VerifyTab(ttk.Frame):
                 self._log.append(f"  Details          : {result.details}")
             except Exception as e:
                 self._log.append(f"❌ Error: {e}")
+            finally:
+                self.after(0, self._finish_run)
 
         _run_in_thread(work)
+
+    def _finish_run(self):
+        self._is_running = False
+        self._run_btn.config(state="normal")
 
 
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import io
 import struct
+import warnings
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -316,6 +317,22 @@ def _roles_to_romset(roles: dict[str, bytes], source: str = "") -> RomSet:
     return RomSet(p=p_rom, s=s_rom, m=m_rom, v=v_rom, c=c_rom)
 
 
+def _store_role_data(
+    roles: dict[str, bytes],
+    role: str,
+    data: bytes,
+    source_name: str,
+    _diagnostic: bool,
+) -> None:
+    """Store role data, rejecting duplicate role mappings."""
+    if role in roles:
+        raise ValueError(
+            f"Duplicate ROM role '{role}' in input: '{source_name}'. "
+            "Each role (P/S/M/Vx/Cx) must map to exactly one file."
+        )
+    roles[role] = data
+
+
 def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
     """Parse a MAME ROM zip and return a RomSet.
 
@@ -334,14 +351,13 @@ def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
                     continue
                 role = _name_to_role(entry.filename)
                 if role is not None:
-                    roles[role] = zf.read(entry.filename)
+                    _store_role_data(roles, role, zf.read(entry.filename), entry.filename, diagnostic)
                 else:
                     ignored.append(entry.filename)
     except zipfile.BadZipFile as e:
         raise ValueError(f"Cannot open ZIP file '{zip_path}': {e}") from e
 
     if diagnostic and ignored:
-        import warnings
         for fn in ignored:
             warnings.warn(
                 f"[diagnostic] Unrecognized file ignored: '{fn}' — "
@@ -367,12 +383,11 @@ def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
         if f.is_file():
             role = _name_to_role(f.name)
             if role is not None:
-                roles[role] = f.read_bytes()
+                _store_role_data(roles, role, f.read_bytes(), f.name, diagnostic)
             else:
                 ignored.append(f.name)
 
     if diagnostic and ignored:
-        import warnings
         for fn in ignored:
             warnings.warn(
                 f"[diagnostic] Unrecognized file ignored: '{fn}' — "
