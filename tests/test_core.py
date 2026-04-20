@@ -19,12 +19,14 @@ from neoconv.core import (
     GENRES,
     NeoMeta,
     RomSet,
+    P_SWAP_SIZE,
     _interleave_c_chips,
     _name_to_role,
     _roles_to_romset,
     build_neo,
     extract_neo_to_zip,
     parse_neo,
+    swap_p_banks,
     verify_roundtrip,
 )
 
@@ -302,3 +304,72 @@ class TestNeoMetaFormatInfo:
         for genre_id, genre_name in GENRES.items():
             meta = NeoMeta(genre=genre_id)
             assert genre_name in meta.format_info()
+
+
+# ---------------------------------------------------------------------------
+# swap_p_banks
+# ---------------------------------------------------------------------------
+
+class TestSwapPBanks:
+    def test_swap_reverses_halves(self):
+        first  = make_rom(P_SWAP_SIZE // 2, 0xAA)
+        second = make_rom(P_SWAP_SIZE // 2, 0xBB)
+        p_rom  = first + second
+        swapped = swap_p_banks(p_rom)
+        assert swapped == second + first
+
+    def test_swap_is_its_own_inverse(self):
+        """Applying swap twice must return the original."""
+        p_rom = make_rom(P_SWAP_SIZE, 0xCC)
+        # Vary second half so the two halves are distinguishable
+        p_rom = make_rom(P_SWAP_SIZE // 2, 0xAA) + make_rom(P_SWAP_SIZE // 2, 0xBB)
+        assert swap_p_banks(swap_p_banks(p_rom)) == p_rom
+
+    def test_wrong_size_raises(self):
+        with pytest.raises(ValueError, match="2 MB"):
+            swap_p_banks(make_rom(1024 * 1024))  # 1 MB — too small
+
+    def test_wrong_size_4mb_raises(self):
+        with pytest.raises(ValueError, match="2 MB"):
+            swap_p_banks(make_rom(4 * 1024 * 1024))  # 4 MB — too large
+
+
+# ---------------------------------------------------------------------------
+# diagnostic mode
+# ---------------------------------------------------------------------------
+
+class TestDiagnosticMode:
+    def test_unrecognized_files_warn(self, tmp_path):
+        import warnings
+        from neoconv.core import parse_mame_dir
+
+        # Write a valid set plus one unrecognized file
+        (tmp_path / "game-p1.bin").write_bytes(make_rom(512 * 1024))
+        (tmp_path / "game-s1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-m1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "readme.txt").write_bytes(b"hello")       # unrecognized
+        (tmp_path / "000-lo.lo").write_bytes(make_rom(128 * 1024))  # unrecognized
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            parse_mame_dir(tmp_path, diagnostic=True)
+
+        warned_names = [str(w.message) for w in caught]
+        # Both unrecognized files should produce warnings
+        assert any("readme.txt" in m for m in warned_names)
+        assert any("000-lo.lo" in m for m in warned_names)
+
+    def test_no_warnings_without_diagnostic(self, tmp_path):
+        import warnings
+        from neoconv.core import parse_mame_dir
+
+        (tmp_path / "game-p1.bin").write_bytes(make_rom(512 * 1024))
+        (tmp_path / "game-s1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-m1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "readme.txt").write_bytes(b"hello")
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            parse_mame_dir(tmp_path, diagnostic=False)
+
+        assert len(caught) == 0
