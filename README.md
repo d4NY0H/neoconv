@@ -1,8 +1,20 @@
 # neoconv
 
-A professional utility for converting between **TerraOnion `.neo` containers** and **MAME / Darksoft Neo Geo ROM sets**.
+A preservation-focused utility for converting between **TerraOnion `.neo` containers** and **MAME / Darksoft Neo Geo ROM sets**.
 
-`neoconv` ensures precise handling of ROM data, supports automatic byte-interleaving for C-ROMs, and provides lossless roundtrip verification — via both CLI and GUI.
+`neoconv` is not just a converter — it is built around the principle of **bit-perfect data integrity**. While other tools often struggle with non-standard ROMs, ROM hacks, or CD conversions, `neoconv` handles any ROM set correctly, including automatic C-ROM byte-interleaving, and proves its own correctness with an integrated roundtrip verification.
+
+---
+
+## Why neoconv?
+
+Most Neo Geo conversion tools are one-way, poorly maintained, or fail silently on non-standard ROM sets. `neoconv` was built to be different:
+
+- **Reliable** — The integrated Verify function proves bit-perfect accuracy for your specific ROM, not just for known sets.
+- **Universal** — Works with any Neo Geo ROM: commercial releases, ROM hacks, CD conversions, and homebrew. No CRC database required.
+- **Smart** — Automatically detects ROM roles (P, S, M, V, C) from file extensions and naming patterns in ZIPs or directories.
+- **Transparent** — Handles the complex C-ROM byte-interleaving that the `.neo` format requires, completely automatically.
+- **Clean** — No external dependencies. Pure Python stdlib only.
 
 ---
 
@@ -10,9 +22,32 @@ A professional utility for converting between **TerraOnion `.neo` containers** a
 
 - **Extract** — Convert `.neo` files to MAME-compatible (`.bin`) or Darksoft (`.rom`) ZIP archives.
 - **Pack** — Build `.neo` files from MAME ZIP archives or directories, with full metadata control.
-- **Verify** — Automated roundtrip check (Extract → Repack → byte-comparison) to guarantee data integrity.
+- **Verify** — Automated lossless roundtrip check to guarantee bit-perfect data integrity.
 - **Info** — Display header metadata and ROM region sizes from any `.neo` file.
 - **Dual Interface** — Full-featured GUI and CLI; both expose identical functionality.
+
+---
+
+## 🛡️ Bit-Perfect Guarantee (Verify)
+
+Collectors and EPROM burners need to be certain that converted ROM data is identical to the source — not just "probably correct". The **Verify** feature provides that certainty.
+
+When you run a verification, `neoconv` performs a full lossless roundtrip:
+
+1. Extracts all ROM regions from the `.neo` file into memory.
+2. Repacks those regions back into a new `.neo` container.
+3. Compares the ROM data of both files **byte-by-byte**.
+
+If even a single byte differs, the tool reports the exact offset and the differing values. A passing verification guarantees that the extraction logic is correct for your specific file — regardless of whether it appears in any known ROM database.
+
+```bash
+neoconv verify game.neo --prefix zin
+# ✅ PASS — extraction is lossless.
+#   Original ROM MD5 : aed6010ef6d15d2dba1a4422e70fc822
+#   Rebuilt  ROM MD5 : aed6010ef6d15d2dba1a4422e70fc822
+```
+
+> **Note:** The `.neo` header (metadata like name, year, NGH) is intentionally excluded from the comparison, as it varies between tools. Only the ROM data matters for correctness.
 
 ---
 
@@ -131,7 +166,7 @@ Available genres: `Other`, `Action`, `BeatEmUp`, `Sports`, `Driving`, `Platforme
 
 ### C-ROM Interleaving
 
-C-ROMs (graphics data) are stored byte-interleaved in `.neo` files — even bytes map to the odd chip (c1, c3, …), odd bytes to the even chip (c2, c4, …). `neoconv` handles de-interleaving on extract and re-interleaving on pack automatically and transparently.
+C-ROMs (graphics data) are stored byte-interleaved in `.neo` files — even bytes map to the odd chip (c1, c3, …), odd bytes to the even chip (c2, c4, …). `neoconv` handles de-interleaving on extract and re-interleaving on pack automatically and transparently. This is one of the most common sources of corruption in manual conversions.
 
 ### `.neo` Container Format
 
