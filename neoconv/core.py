@@ -47,6 +47,27 @@ NEO_MAGIC = b"NEO\x01"
 NEO_HEADER_SIZE = 0x1000  # 4096 bytes
 C_BANK_SIZE = 2 * 1024 * 1024  # 2 MB per interleaved bank (= one c-chip pair)
 V_BANK_SIZE = 4 * 1024 * 1024  # 4 MB per V ROM chunk
+P_SWAP_SIZE = 2 * 1024 * 1024  # 2 MB: size that triggers optional P-ROM bank swap
+
+
+def swap_p_banks(p_rom: bytes) -> bytes:
+    """
+    Swap the two 1 MB halves of a 2 MB P-ROM.
+
+    Some Neo Geo titles (mostly early SNK releases with P-ROM banking) store
+    their program data in a layout where the NeoSD/MiSTer expects the two
+    megabytes in reversed order. This transformation is only needed for those
+    specific games — activate it explicitly with --swap-p rather than
+    automatically, since applying it to games that don't need it will break them.
+
+    Only valid for exactly 2 MB P-ROMs. Raises ValueError otherwise.
+    """
+    if len(p_rom) != P_SWAP_SIZE:
+        raise ValueError(
+            f"P-ROM bank swap requires exactly 2 MB (got {len(p_rom):,} bytes)."
+        )
+    half = P_SWAP_SIZE // 2
+    return p_rom[half:] + p_rom[:half]
 
 GENRES = {
     0: "Other",
@@ -278,9 +299,17 @@ def _roles_to_romset(roles: dict[str, bytes], source: str = "") -> RomSet:
     return RomSet(p=p_rom, s=s_rom, m=m_rom, v=v_rom, c=c_rom)
 
 
-def parse_mame_zip(zip_path: Path) -> RomSet:
-    """Parse a MAME ROM zip and return a RomSet."""
+def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
+    """Parse a MAME ROM zip and return a RomSet.
+
+    Parameters
+    ----------
+    zip_path   : path to the ZIP file
+    diagnostic : if True, print a warning for every file that was not
+                 recognized, so the user can diagnose naming issues.
+    """
     roles: dict[str, bytes] = {}
+    ignored: list[str] = []
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
             for entry in zf.infolist():
@@ -289,20 +318,51 @@ def parse_mame_zip(zip_path: Path) -> RomSet:
                 role = _name_to_role(entry.filename)
                 if role is not None:
                     roles[role] = zf.read(entry.filename)
+                else:
+                    ignored.append(entry.filename)
     except zipfile.BadZipFile as e:
         raise ValueError(f"Cannot open ZIP file '{zip_path}': {e}") from e
+
+    if diagnostic and ignored:
+        import warnings
+        for fn in ignored:
+            warnings.warn(
+                f"[diagnostic] Unrecognized file ignored: '{fn}' — "
+                "check naming (expected e.g. game-p1.bin, game-c1.c1, ...)",
+                stacklevel=2,
+            )
 
     return _roles_to_romset(roles, source=str(zip_path))
 
 
-def parse_mame_dir(dir_path: Path) -> RomSet:
-    """Parse a directory of raw ROM files and return a RomSet."""
+def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
+    """Parse a directory of raw ROM files and return a RomSet.
+
+    Parameters
+    ----------
+    dir_path   : directory containing ROM files
+    diagnostic : if True, print a warning for every file that was not
+                 recognized, so the user can diagnose naming issues.
+    """
     roles: dict[str, bytes] = {}
+    ignored: list[str] = []
     for f in dir_path.iterdir():
         if f.is_file():
             role = _name_to_role(f.name)
             if role is not None:
                 roles[role] = f.read_bytes()
+            else:
+                ignored.append(f.name)
+
+    if diagnostic and ignored:
+        import warnings
+        for fn in ignored:
+            warnings.warn(
+                f"[diagnostic] Unrecognized file ignored: '{fn}' — "
+                "check naming (expected e.g. game-p1.bin, game-c1.c1, ...)",
+                stacklevel=2,
+            )
+
     return _roles_to_romset(roles, source=str(dir_path))
 
 
@@ -500,13 +560,17 @@ def neo_to_darksoft_zip(neo_path: Path, prefix: str) -> bytes:
     return extract_neo_to_zip(neo_path.read_bytes(), name_prefix=prefix, fmt="darksoft")
 
 
-def mame_zip_to_neo(zip_path: Path, meta: NeoMeta) -> bytes:
+def mame_zip_to_neo(zip_path: Path, meta: NeoMeta, swap_p: bool = False, diagnostic: bool = False) -> bytes:
     """Convert a MAME ROM zip to a .neo binary."""
-    romset = parse_mame_zip(zip_path)
+    romset = parse_mame_zip(zip_path, diagnostic=diagnostic)
+    if swap_p:
+        romset.p = swap_p_banks(romset.p)
     return build_neo(romset, meta)
 
 
-def mame_dir_to_neo(dir_path: Path, meta: NeoMeta) -> bytes:
+def mame_dir_to_neo(dir_path: Path, meta: NeoMeta, swap_p: bool = False, diagnostic: bool = False) -> bytes:
     """Convert a directory of MAME ROM files to a .neo binary."""
-    romset = parse_mame_dir(dir_path)
+    romset = parse_mame_dir(dir_path, diagnostic=diagnostic)
+    if swap_p:
+        romset.p = swap_p_banks(romset.p)
     return build_neo(romset, meta)

@@ -137,10 +137,10 @@ def cmd_pack(args: argparse.Namespace) -> None:
 
     if src.is_dir():
         print(f"Packing directory: {src}")
-        neo_data = mame_dir_to_neo(src, meta)
+        neo_data = mame_dir_to_neo(src, meta, swap_p=args.swap_p, diagnostic=args.diagnostic)
     elif zipfile.is_zipfile(src):
         print(f"Packing ZIP: {src}")
-        neo_data = mame_zip_to_neo(src, meta)
+        neo_data = mame_zip_to_neo(src, meta, swap_p=args.swap_p, diagnostic=args.diagnostic)
     else:
         print(f"Error: input must be a directory or ZIP file.", file=sys.stderr)
         sys.exit(1)
@@ -244,6 +244,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pack.add_argument("--ngh", type=int, default=0, help="NGH number")
     p_pack.add_argument("--screenshot", type=int, default=0, help="Screenshot number (TerraOnion)")
+    p_pack.add_argument(
+        "--swap-p", action="store_true", default=False,
+        help=(
+            "Swap the two 1 MB halves of a 2 MB P-ROM before packing. "
+            "Required for some early SNK titles with P-ROM banking (e.g. early KOF). "
+            "Only valid for exactly 2 MB P-ROMs. Do NOT use unless you know the game needs it."
+        )
+    )
+    p_pack.add_argument(
+        "--diagnostic", action="store_true", default=False,
+        help="Print a warning for every file that was not recognized, to help diagnose naming issues."
+    )
     p_pack.set_defaults(func=cmd_pack)
 
     # -- verify --
