@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neoconv"
+version = "1.0.0"
+description = "Convert between .neo container files and MAME / Darksoft Neo Geo ROM sets"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "d4NY0H" }]
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.scripts]
+neoconv     = "neoconv.cli:main"
+neoconv-gui = "neoconv.gui:main"
+
+[project.urls]
+Homepage = "https://github.com/d4NY0H/neoconv"
+Issues   = "https://github.com/d4NY0H/neoconv/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
