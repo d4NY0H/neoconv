@@ -121,7 +121,7 @@ class TestCRomInterleaving:
 
         # RomSet.c_chips() de-interleaves back
         rs = RomSet(c=interleaved)
-        chips = rs.c_chips()
+        chips = rs.c_chips(chip_size=C_BANK_SIZE)
         assert chips[0] == c1
         assert chips[1] == c2
 
@@ -133,8 +133,24 @@ class TestCRomInterleaving:
         interleaved = _interleave_c_chips([c1, c2, c3, c4])
 
         rs = RomSet(c=interleaved)
-        chips = rs.c_chips()
+        chips = rs.c_chips(chip_size=C_BANK_SIZE)
         assert chips == [c1, c2, c3, c4]
+
+    def test_large_chip_size(self):
+        """4 MB chips (e.g. Neo Turf Masters) roundtrip correctly."""
+        large = 4 * 1024 * 1024
+        c1 = make_rom(large, 0xAA)
+        c2 = make_rom(large, 0xBB)
+        interleaved = _interleave_c_chips([c1, c2])
+        rs = RomSet(c=interleaved)
+        chips = rs.c_chips(chip_size=large)
+        assert chips == [c1, c2]
+
+    def test_wrong_chip_size_raises(self):
+        """chip_size that doesn't divide C evenly should raise."""
+        rs = RomSet(c=make_rom(C_BANK_SIZE * 2, 0xFF))
+        with pytest.raises(ValueError, match="not a multiple"):
+            rs.c_chips(chip_size=C_BANK_SIZE + 1)
 
     def test_size_mismatch_raises(self):
         with pytest.raises(ValueError, match="size mismatch"):
@@ -235,7 +251,7 @@ class TestExtractNeoToZip:
         assert "test-c1.rom" in names
 
     def test_v_rom_split(self):
-        """8 MB V ROM should produce v1 + v2."""
+        """8 MB V ROM should produce 4x 2 MB chunks (v1..v4)."""
         rs = make_romset(v_size=8 * 1024 * 1024)
         neo = make_neo(rs)
         zip_bytes = extract_neo_to_zip(neo, name_prefix="x", fmt="mame")
@@ -243,7 +259,9 @@ class TestExtractNeoToZip:
             names = zf.namelist()
         assert "x-v1.bin" in names
         assert "x-v2.bin" in names
-        assert "x-v3.bin" not in names
+        assert "x-v3.bin" in names
+        assert "x-v4.bin" in names
+        assert "x-v5.bin" not in names
 
 
 # ---------------------------------------------------------------------------
