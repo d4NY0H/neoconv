@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import io
 import struct
+import warnings
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -316,6 +317,22 @@ def _roles_to_romset(roles: dict[str, bytes], source: str = "") -> RomSet:
     return RomSet(p=p_rom, s=s_rom, m=m_rom, v=v_rom, c=c_rom)
 
 
+def _store_role_data(
+    roles: dict[str, bytes],
+    role: str,
+    data: bytes,
+    source_name: str,
+    _diagnostic: bool,
+) -> None:
+    """Store role data, rejecting duplicate role mappings."""
+    if role in roles:
+        raise ValueError(
+            f"Duplicate ROM role '{role}' in input: '{source_name}'. "
+            "Each role (P/S/M/Vx/Cx) must map to exactly one file."
+        )
+    roles[role] = data
+
+
 def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
     """Parse a MAME ROM zip and return a RomSet.
 
@@ -334,14 +351,13 @@ def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
                     continue
                 role = _name_to_role(entry.filename)
                 if role is not None:
-                    roles[role] = zf.read(entry.filename)
+                    _store_role_data(roles, role, zf.read(entry.filename), entry.filename, diagnostic)
                 else:
                     ignored.append(entry.filename)
     except zipfile.BadZipFile as e:
         raise ValueError(f"Cannot open ZIP file '{zip_path}': {e}") from e
 
     if diagnostic and ignored:
-        import warnings
         for fn in ignored:
             warnings.warn(
                 f"[diagnostic] Unrecognized file ignored: '{fn}' — "
@@ -367,12 +383,11 @@ def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
         if f.is_file():
             role = _name_to_role(f.name)
             if role is not None:
-                roles[role] = f.read_bytes()
+                _store_role_data(roles, role, f.read_bytes(), f.name, diagnostic)
             else:
                 ignored.append(f.name)
 
     if diagnostic and ignored:
-        import warnings
         for fn in ignored:
             warnings.warn(
                 f"[diagnostic] Unrecognized file ignored: '{fn}' — "
@@ -443,19 +458,19 @@ def build_neo(romset: RomSet, meta: NeoMeta) -> bytes:
 # Extractor: .neo -> files
 # ---------------------------------------------------------------------------
 
-def extract_neo(
-    neo_data: bytes,
+def extract_romset(
+    romset: RomSet,
     output_dir: Path,
     name_prefix: str = "game",
     fmt: str = "mame",
     c_chip_size: int = C_CHIP_SIZE_DEFAULT,
 ) -> dict[str, Path]:
     """
-    Extract a .neo file into individual ROM files.
+    Extract a parsed RomSet into individual ROM files.
 
     Parameters
     ----------
-    neo_data     : raw bytes of the .neo file
+    romset       : parsed ROM regions
     output_dir   : destination directory
     name_prefix  : filename prefix (e.g. 'turfmast' -> turfmast-p1.bin)
     fmt          : 'mame' -> .bin extension, 'darksoft' -> .rom extension
@@ -465,7 +480,6 @@ def extract_neo(
     Returns dict mapping role -> output Path.
     """
     ext = ".bin" if fmt == "mame" else ".rom"
-    romset = parse_neo(neo_data)
     output_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
 
@@ -489,6 +503,61 @@ def extract_neo(
     return written
 
 
+def extract_neo(
+    neo_data: bytes,
+    output_dir: Path,
+    name_prefix: str = "game",
+    fmt: str = "mame",
+    c_chip_size: int = C_CHIP_SIZE_DEFAULT,
+) -> dict[str, Path]:
+    """
+    Extract a .neo file into individual ROM files.
+
+    Parameters
+    ----------
+    neo_data     : raw bytes of the .neo file
+    output_dir   : destination directory
+    name_prefix  : filename prefix (e.g. 'turfmast' -> turfmast-p1.bin)
+    fmt          : 'mame' -> .bin extension, 'darksoft' -> .rom extension
+    c_chip_size  : size of each C chip in bytes (default 2 MB).
+                   Use 4 MB for games with larger C chips (e.g. Neo Turf Masters).
+
+    Returns dict mapping role -> output Path.
+    """
+    romset = parse_neo(neo_data)
+    return extract_romset(romset, output_dir, name_prefix=name_prefix, fmt=fmt,
+                          c_chip_size=c_chip_size)
+
+
+def extract_romset_to_zip(
+    romset: RomSet,
+    name_prefix: str = "game",
+    fmt: str = "mame",
+    c_chip_size: int = C_CHIP_SIZE_DEFAULT,
+) -> bytes:
+    """
+    Like extract_romset but returns a ZIP archive as bytes.
+
+    Parameters
+    ----------
+    c_chip_size : size of each C chip in bytes (default 2 MB).
+                  Use 4 MB for games with larger C chips (e.g. Neo Turf Masters).
+    """
+    ext = ".bin" if fmt == "mame" else ".rom"
+    buf = io.BytesIO()
+
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{name_prefix}-p1{ext}", romset.p)
+        zf.writestr(f"{name_prefix}-s1{ext}", romset.s)
+        zf.writestr(f"{name_prefix}-m1{ext}", romset.m)
+        for i, chunk in enumerate(romset.v_chunks(), start=1):
+            zf.writestr(f"{name_prefix}-v{i}{ext}", chunk)
+        for i, chip in enumerate(romset.c_chips(chip_size=c_chip_size), start=1):
+            zf.writestr(f"{name_prefix}-c{i}{ext}", chip)
+
+    return buf.getvalue()
+
+
 def extract_neo_to_zip(
     neo_data: bytes,
     name_prefix: str = "game",
@@ -502,20 +571,9 @@ def extract_neo_to_zip(
     c_chip_size : size of each C chip in bytes (default 2 MB).
                   Use 4 MB for games with larger C chips (e.g. Neo Turf Masters).
     """
-    ext = ".bin" if fmt == "mame" else ".rom"
     romset = parse_neo(neo_data)
-    buf = io.BytesIO()
-
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(f"{name_prefix}-p1{ext}", romset.p)
-        zf.writestr(f"{name_prefix}-s1{ext}", romset.s)
-        zf.writestr(f"{name_prefix}-m1{ext}", romset.m)
-        for i, chunk in enumerate(romset.v_chunks(), start=1):
-            zf.writestr(f"{name_prefix}-v{i}{ext}", chunk)
-        for i, chip in enumerate(romset.c_chips(chip_size=c_chip_size), start=1):
-            zf.writestr(f"{name_prefix}-c{i}{ext}", chip)
-
-    return buf.getvalue()
+    return extract_romset_to_zip(romset, name_prefix=name_prefix, fmt=fmt,
+                                 c_chip_size=c_chip_size)
 
 
 # ---------------------------------------------------------------------------

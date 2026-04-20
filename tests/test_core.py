@@ -25,6 +25,8 @@ from neoconv.core import (
     _roles_to_romset,
     build_neo,
     extract_neo_to_zip,
+    extract_romset,
+    extract_romset_to_zip,
     parse_neo,
     swap_p_banks,
     verify_roundtrip,
@@ -263,6 +265,37 @@ class TestExtractNeoToZip:
         assert "x-v4.bin" in names
         assert "x-v5.bin" not in names
 
+    def test_extract_romset_to_zip_matches_extract_neo_to_zip(self):
+        """RomSet-based ZIP extraction should match neo_data-based extraction."""
+        rs = make_romset()
+        neo = make_neo(rs)
+        zip_from_neo = extract_neo_to_zip(neo, name_prefix="cmp", fmt="mame")
+        parsed = parse_neo(neo)
+        zip_from_romset = extract_romset_to_zip(parsed, name_prefix="cmp", fmt="mame")
+
+        with zipfile.ZipFile(io.BytesIO(zip_from_neo)) as z1, zipfile.ZipFile(io.BytesIO(zip_from_romset)) as z2:
+            names1 = sorted(z1.namelist())
+            names2 = sorted(z2.namelist())
+            assert names1 == names2
+            for name in names1:
+                assert z1.read(name) == z2.read(name)
+
+    def test_extract_romset_writes_same_files_as_extract_neo(self, tmp_path):
+        """RomSet-based directory extraction should match neo_data-based extraction."""
+        from neoconv.core import extract_neo
+
+        rs = make_romset()
+        neo = make_neo(rs)
+        out_neo = tmp_path / "from_neo"
+        out_rs = tmp_path / "from_rs"
+
+        files_from_neo = extract_neo(neo, out_neo, name_prefix="cmp", fmt="mame")
+        files_from_rs = extract_romset(parse_neo(neo), out_rs, name_prefix="cmp", fmt="mame")
+
+        assert sorted(files_from_neo.keys()) == sorted(files_from_rs.keys())
+        for key in files_from_neo:
+            assert files_from_neo[key].read_bytes() == files_from_rs[key].read_bytes()
+
 
 # ---------------------------------------------------------------------------
 # verify_roundtrip
@@ -391,3 +424,28 @@ class TestDiagnosticMode:
             parse_mame_dir(tmp_path, diagnostic=False)
 
         assert len(caught) == 0
+
+    def test_duplicate_role_in_directory_raises(self, tmp_path):
+        from neoconv.core import parse_mame_dir
+
+        # Both map to role "P" and should be rejected to avoid ambiguity.
+        (tmp_path / "game-p1.bin").write_bytes(make_rom(512 * 1024))
+        (tmp_path / "alt_p1.bin").write_bytes(make_rom(512 * 1024, 0xAB))
+        (tmp_path / "game-s1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-m1.bin").write_bytes(make_rom(128 * 1024))
+
+        with pytest.raises(ValueError, match="Duplicate ROM role"):
+            parse_mame_dir(tmp_path, diagnostic=False)
+
+    def test_duplicate_role_in_zip_raises(self, tmp_path):
+        from neoconv.core import parse_mame_zip
+
+        zip_path = tmp_path / "dupe.zip"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("game-p1.bin", make_rom(512 * 1024))
+            zf.writestr("alt_p1.bin", make_rom(512 * 1024, 0xAB))
+            zf.writestr("game-s1.bin", make_rom(128 * 1024))
+            zf.writestr("game-m1.bin", make_rom(128 * 1024))
+
+        with pytest.raises(ValueError, match="Duplicate ROM role"):
+            parse_mame_zip(zip_path, diagnostic=False)
