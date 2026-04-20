@@ -25,6 +25,8 @@ from neoconv.core import (
     _roles_to_romset,
     build_neo,
     extract_neo_to_zip,
+    extract_romset,
+    extract_romset_to_zip,
     parse_neo,
     swap_p_banks,
     verify_roundtrip,
@@ -262,6 +264,37 @@ class TestExtractNeoToZip:
         assert "x-v3.bin" in names
         assert "x-v4.bin" in names
         assert "x-v5.bin" not in names
+
+    def test_extract_romset_to_zip_matches_extract_neo_to_zip(self):
+        """RomSet-based ZIP extraction should match neo_data-based extraction."""
+        rs = make_romset()
+        neo = make_neo(rs)
+        zip_from_neo = extract_neo_to_zip(neo, name_prefix="cmp", fmt="mame")
+        parsed = parse_neo(neo)
+        zip_from_romset = extract_romset_to_zip(parsed, name_prefix="cmp", fmt="mame")
+
+        with zipfile.ZipFile(io.BytesIO(zip_from_neo)) as z1, zipfile.ZipFile(io.BytesIO(zip_from_romset)) as z2:
+            names1 = sorted(z1.namelist())
+            names2 = sorted(z2.namelist())
+            assert names1 == names2
+            for name in names1:
+                assert z1.read(name) == z2.read(name)
+
+    def test_extract_romset_writes_same_files_as_extract_neo(self, tmp_path):
+        """RomSet-based directory extraction should match neo_data-based extraction."""
+        from neoconv.core import extract_neo
+
+        rs = make_romset()
+        neo = make_neo(rs)
+        out_neo = tmp_path / "from_neo"
+        out_rs = tmp_path / "from_rs"
+
+        files_from_neo = extract_neo(neo, out_neo, name_prefix="cmp", fmt="mame")
+        files_from_rs = extract_romset(parse_neo(neo), out_rs, name_prefix="cmp", fmt="mame")
+
+        assert sorted(files_from_neo.keys()) == sorted(files_from_rs.keys())
+        for key in files_from_neo:
+            assert files_from_neo[key].read_bytes() == files_from_rs[key].read_bytes()
 
 
 # ---------------------------------------------------------------------------
