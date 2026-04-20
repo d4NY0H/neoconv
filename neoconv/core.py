@@ -45,9 +45,12 @@ from typing import Optional
 
 NEO_MAGIC = b"NEO\x01"
 NEO_HEADER_SIZE = 0x1000  # 4096 bytes
-C_BANK_SIZE = 2 * 1024 * 1024  # 2 MB per interleaved bank (= one c-chip pair)
-V_BANK_SIZE = 4 * 1024 * 1024  # 4 MB per V ROM chunk
+C_CHIP_SIZE_DEFAULT = 2 * 1024 * 1024  # 2 MB default C chip size (most games)
+V_BANK_SIZE = 2 * 1024 * 1024  # 2 MB per V ROM chunk (MAME standard)
 P_SWAP_SIZE = 2 * 1024 * 1024  # 2 MB: size that triggers optional P-ROM bank swap
+
+# Backwards-compatible alias
+C_BANK_SIZE = C_CHIP_SIZE_DEFAULT
 
 
 def swap_p_banks(p_rom: bytes) -> bytes:
@@ -134,28 +137,42 @@ class RomSet:
     # --- derived helpers ---
 
     def v_chunks(self) -> list[bytes]:
-        """Split V data into V_BANK_SIZE chunks."""
+        """Split V data into V_BANK_SIZE (2 MB) chunks."""
         chunks = []
         for i in range(0, len(self.v), V_BANK_SIZE):
             chunks.append(self.v[i : i + V_BANK_SIZE])
         return chunks
 
-    def c_chips(self) -> list[bytes]:
+    def c_chips(self, chip_size: int = C_CHIP_SIZE_DEFAULT) -> list[bytes]:
         """
         De-interleave C ROM into individual chip images.
-        .neo stores C data byte-interleaved:
-          byte 0 -> chip 1 (c1/c3/...)
-          byte 1 -> chip 2 (c2/c4/...)
-        Each pair of chips is C_BANK_SIZE bytes each.
+
+        .neo stores C data byte-interleaved in banks:
+          byte 0 -> chip N (c1/c3/...)
+          byte 1 -> chip N+1 (c2/c4/...)
+
+        Each interleaved bank = chip_size * 2 bytes.
         Returns list: [c1, c2, c3, c4, ...]
+
+        Parameters
+        ----------
+        chip_size : size of each individual chip in bytes.
+                    Default 2 MB covers most Neo Geo games.
+                    Use 4 MB for games with larger C chips (e.g. Neo Turf Masters).
+                    When in doubt, check the MAME ROM set for the expected chip sizes.
         """
+        bank_size = chip_size * 2
+        if len(self.c) % bank_size != 0:
+            raise ValueError(
+                f"C ROM size ({len(self.c):,} bytes) is not a multiple of "
+                f"chip_size*2 ({bank_size:,} bytes). "
+                f"Try a different --c-chip-size value."
+            )
         chips = []
-        for bank_start in range(0, len(self.c), C_BANK_SIZE * 2):
-            bank = self.c[bank_start : bank_start + C_BANK_SIZE * 2]
-            odd  = bytes(bank[0::2])   # c1, c3, ...
-            even = bytes(bank[1::2])   # c2, c4, ...
-            chips.append(odd)
-            chips.append(even)
+        for bank_start in range(0, len(self.c), bank_size):
+            bank = self.c[bank_start : bank_start + bank_size]
+            chips.append(bytes(bank[0::2]))  # odd chip  (c1, c3, ...)
+            chips.append(bytes(bank[1::2]))  # even chip (c2, c4, ...)
         return chips
 
 
@@ -431,17 +448,19 @@ def extract_neo(
     output_dir: Path,
     name_prefix: str = "game",
     fmt: str = "mame",
+    c_chip_size: int = C_CHIP_SIZE_DEFAULT,
 ) -> dict[str, Path]:
     """
     Extract a .neo file into individual ROM files.
 
     Parameters
     ----------
-    neo_data    : raw bytes of the .neo file
-    output_dir  : destination directory
-    name_prefix : filename prefix (e.g. 'zin' -> zin-p1.bin)
-    fmt         : 'mame'     -> .bin extension
-                  'darksoft' -> .rom extension
+    neo_data     : raw bytes of the .neo file
+    output_dir   : destination directory
+    name_prefix  : filename prefix (e.g. 'turfmast' -> turfmast-p1.bin)
+    fmt          : 'mame' -> .bin extension, 'darksoft' -> .rom extension
+    c_chip_size  : size of each C chip in bytes (default 2 MB).
+                   Use 4 MB for games with larger C chips (e.g. Neo Turf Masters).
 
     Returns dict mapping role -> output Path.
     """
@@ -464,7 +483,7 @@ def extract_neo(
     for i, chunk in enumerate(romset.v_chunks(), start=1):
         write("v", chunk, suffix=str(i))
 
-    for i, chip in enumerate(romset.c_chips(), start=1):
+    for i, chip in enumerate(romset.c_chips(chip_size=c_chip_size), start=1):
         write("c", chip, suffix=str(i))
 
     return written
@@ -474,8 +493,15 @@ def extract_neo_to_zip(
     neo_data: bytes,
     name_prefix: str = "game",
     fmt: str = "mame",
+    c_chip_size: int = C_CHIP_SIZE_DEFAULT,
 ) -> bytes:
-    """Like extract_neo but returns a ZIP archive as bytes."""
+    """Like extract_neo but returns a ZIP archive as bytes.
+
+    Parameters
+    ----------
+    c_chip_size : size of each C chip in bytes (default 2 MB).
+                  Use 4 MB for games with larger C chips (e.g. Neo Turf Masters).
+    """
     ext = ".bin" if fmt == "mame" else ".rom"
     romset = parse_neo(neo_data)
     buf = io.BytesIO()
@@ -486,7 +512,7 @@ def extract_neo_to_zip(
         zf.writestr(f"{name_prefix}-m1{ext}", romset.m)
         for i, chunk in enumerate(romset.v_chunks(), start=1):
             zf.writestr(f"{name_prefix}-v{i}{ext}", chunk)
-        for i, chip in enumerate(romset.c_chips(), start=1):
+        for i, chip in enumerate(romset.c_chips(chip_size=c_chip_size), start=1):
             zf.writestr(f"{name_prefix}-c{i}{ext}", chip)
 
     return buf.getvalue()

@@ -104,9 +104,20 @@ def cmd_extract(args: argparse.Namespace) -> None:
     prefix = args.prefix or neo_path.stem
     fmt    = args.format  # 'mame' or 'darksoft'
 
+    # c_chip_size: 0 means auto (C_total / 2 = one chip pair, maximum chip size)
+    from neoconv.core import C_CHIP_SIZE_DEFAULT
+    if args.c_chip_size > 0:
+        c_chip_size = args.c_chip_size
+    else:
+        # auto: derive from total C size — use full C/2 as one chip pair
+        from neoconv.core import parse_neo as _parse
+        _rs = _parse(neo_data)
+        c_chip_size = len(_rs.c) // 2 if len(_rs.c) > 0 else C_CHIP_SIZE_DEFAULT
+
     if args.out_dir:
         out_dir = Path(args.out_dir)
-        written = extract_neo(neo_data, out_dir, name_prefix=prefix, fmt=fmt)
+        written = extract_neo(neo_data, out_dir, name_prefix=prefix, fmt=fmt,
+                              c_chip_size=c_chip_size)
         print(f"Extracted {len(written)} files to: {out_dir}")
         for role, p in sorted(written.items()):
             print(f"  {p.name:<30} {p.stat().st_size:>10,} bytes")
@@ -114,7 +125,8 @@ def cmd_extract(args: argparse.Namespace) -> None:
         out_path = Path(args.out) if args.out else neo_path.with_suffix(
             f".{'mame' if fmt == 'mame' else 'darksoft'}.zip"
         )
-        zip_data = extract_neo_to_zip(neo_data, name_prefix=prefix, fmt=fmt)
+        zip_data = extract_neo_to_zip(neo_data, name_prefix=prefix, fmt=fmt,
+                                      c_chip_size=c_chip_size)
         out_path.write_bytes(zip_data)
         print(f"Written: {out_path}  ({len(zip_data)/1024/1024:.2f} MB)")
         with zipfile.ZipFile(out_path) as zf:
@@ -229,6 +241,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_extract.add_argument("--out", "-o", default="", help="Output ZIP path")
     p_extract.add_argument("--out-dir", "-d", default="", help="Output directory (instead of ZIP)")
+    p_extract.add_argument(
+        "--c-chip-size", type=int, default=0, metavar="BYTES",
+        help=(
+            "Size of each C chip in bytes for de-interleaving (default: auto = C_total/2). "
+            "Use 2097152 (2 MB) for most games, 4194304 (4 MB) for games with larger chips "
+            "(e.g. Neo Turf Masters). Check the MAME ROM set for expected chip sizes."
+        )
+    )
     p_extract.set_defaults(func=cmd_extract)
 
     # -- pack --
