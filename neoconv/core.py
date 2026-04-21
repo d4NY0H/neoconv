@@ -22,11 +22,25 @@ The .neo format (TerraOnion NeoSD):
   Data: P, S, M, V1, V2, C  (in this order, sizes from header)
 
 C ROM layout in .neo:
-  Bytes are interleaved: even bytes = C-odd chips (c1, c3, ...),
-  odd bytes = C-even chips (c2, c4, ...).
-  Each interleaved pair forms one 'C bank' of 2 MB (2097152 bytes).
-  -> 4 MB C ROM = 2x 2 MB chips (c1 + c2), de-interleaved.
-  -> 8 MB C ROM = 4x 2 MB chips (c1+c2+c3+c4), etc.
+  Bytes are interleaved: even bytes → odd-numbered chips (c1, c3, ...),
+                         odd  bytes → even-numbered chips (c2, c4, ...).
+
+  The .neo container stores the total interleaved C data as one contiguous
+  block. The original chip boundaries are NOT recorded in the header —
+  de-interleaving requires knowing the individual chip size, which varies
+  by game and must be looked up from the MAME/FBNeo ROM set.
+
+  Common chip sizes found in the Neo Geo library (per chip, before interleaving):
+    512 KB, 1 MB, 2 MB, 4 MB, 8 MB, 16 MB, 20 MB
+
+  Examples:
+    4 MB C total, 2 MB chips → interleaved(c1[2MB], c2[2MB])
+    8 MB C total, 4 MB chips → interleaved(c1[4MB], c2[4MB])
+    8 MB C total, 2 MB chips → interleaved(c1[2MB], c2[2MB])
+                              + interleaved(c3[2MB], c4[2MB])
+
+  Use the --c-chip-size option to specify the correct chip size when extracting.
+  Default is 2 MB, which covers the majority of titles.
 """
 
 from __future__ import annotations
