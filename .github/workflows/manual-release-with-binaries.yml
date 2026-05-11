@@ -100,15 +100,12 @@ jobs:
         include:
           - os: windows-latest
             label: windows
-            binary_name: neoconv-gui.exe
             asset_suffix: windows.exe
           - os: macos-latest
             label: macos
-            binary_name: neoconv-gui
-            asset_suffix: macos
+            asset_suffix: macos.zip
           - os: ubuntu-latest
             label: linux
-            binary_name: neoconv-gui
             asset_suffix: linux
 
     runs-on: ${{ matrix.os }}
@@ -135,10 +132,15 @@ jobs:
               "from neoconv.gui import main\nif __name__ == '__main__':\n    main()\n"
           )
 
-      - name: Build with PyInstaller
+      - name: Build with PyInstaller (Windows / Linux)
+        if: matrix.label != 'macos'
         run: pyinstaller --onefile --windowed --name neoconv-gui _gui_entry.py
 
-      - name: Locate and rename binary (Windows)
+      - name: Build with PyInstaller (macOS — .app bundle)
+        if: matrix.label == 'macos'
+        run: pyinstaller --windowed --name neoconv-gui _gui_entry.py
+
+      - name: Package and rename (Windows)
         if: matrix.label == 'windows'
         shell: pwsh
         run: |
@@ -148,8 +150,18 @@ jobs:
           Copy-Item $src.FullName $dest
           echo "ASSET_PATH=$dest" >> $env:GITHUB_ENV
 
-      - name: Locate and rename binary (macOS / Linux)
-        if: matrix.label != 'windows'
+      - name: Package and rename (macOS — zip the .app)
+        if: matrix.label == 'macos'
+        run: |
+          VERSION="${{ needs.prepare.outputs.tag }}"
+          DEST="neoconv-gui-${VERSION}-${{ matrix.asset_suffix }}"
+          cd dist
+          zip -r "../$DEST" "neoconv-gui.app"
+          cd ..
+          echo "ASSET_PATH=$DEST" >> $GITHUB_ENV
+
+      - name: Package and rename (Linux)
+        if: matrix.label == 'linux'
         run: |
           VERSION="${{ needs.prepare.outputs.tag }}"
           SRC=$(find dist -maxdepth 1 -name "neoconv-gui" -type f | head -1)
@@ -157,7 +169,7 @@ jobs:
           cp "$SRC" "$DEST"
           echo "ASSET_PATH=$DEST" >> $GITHUB_ENV
 
-      - name: Upload binary to release
+      - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
