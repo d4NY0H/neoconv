@@ -6,6 +6,9 @@ Tkinter GUI for neoconv. Feature-complete with the CLI.
 
 from __future__ import annotations
 
+import json
+import os
+import sys
 import tempfile
 import threading
 import tkinter as tk
@@ -29,6 +32,14 @@ from .core import (
     parse_neo,
     verify_roundtrip,
 )
+
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD  # type: ignore
+    _DND_AVAILABLE = True
+except Exception:
+    DND_FILES = None
+    TkinterDnD = None
+    _DND_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +65,13 @@ _V_CHUNK_SIZES = [
     ("8 MB",               8 * 1024 * 1024),
     ("16 MB",             16 * 1024 * 1024),
 ]
+
+if os.name == "nt":
+    _SETTINGS_PATH = Path.home() / "AppData" / "Roaming" / "neoconv" / "config.json"
+elif os.name == "posix" and "darwin" in sys.platform:
+    _SETTINGS_PATH = Path.home() / "Library" / "Application Support" / "neoconv" / "config.json"
+else:
+    _SETTINGS_PATH = Path.home() / ".config" / "neoconv" / "config.json"
 
 
 # ---------------------------------------------------------------------------
@@ -112,25 +130,87 @@ def _enforce_latin1_byte_limit(var: tk.StringVar, max_bytes: int) -> None:
     var.trace_add("write", _on_write)
 
 
+def _load_settings() -> dict:
+    try:
+        return json.loads(_SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_settings(data: dict) -> None:
+    _SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _SETTINGS_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _name_to_required_role(filename: str) -> str | None:
+    fn = Path(filename).name.lower()
+    ext = Path(fn).suffix.lstrip(".")
+    stem = Path(fn).stem
+    ext_map = {"p1": "P", "p2": "P", "s1": "S", "m1": "M"}
+    if ext in ext_map:
+        return ext_map[ext]
+    for key, role in ext_map.items():
+        if fn.endswith(f"-{key}.bin") or fn.endswith(f"_{key}.bin") \
+                or stem.endswith(f"-{key}") or stem.endswith(f"_{key}"):
+            return role
+    return None
+
+
+def _scan_required_roles(src: Path) -> set[str]:
+    roles: set[str] = set()
+    if src.is_dir():
+        for f in src.iterdir():
+            if f.is_file():
+                role = _name_to_required_role(f.name)
+                if role:
+                    roles.add(role)
+    elif zipfile.is_zipfile(src):
+        with zipfile.ZipFile(src, "r") as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                role = _name_to_required_role(info.filename)
+                if role:
+                    roles.add(role)
+    return roles
+
+
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
 
-class NeoConvApp(tk.Tk):
+class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"neoconv {__version__}")
         # Allow resizing so the log area can grow on demand.
         self.resizable(True, True)
+        self._settings = _load_settings()
+        self._tabs: dict[str, tk.Widget] = {}
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
-        for tab, label in [
-            (ExtractTab(nb), "Extract (.neo → files)"),
-            (PackTab(nb),    "Pack (files → .neo)"),
-            (VerifyTab(nb),  "Verify (Roundtrip)"),
-            (InfoTab(nb),    "Info (.neo)"),
+        for key, tab, label in [
+            ("extract", ExtractTab(nb), "Extract (.neo → files)"),
+            ("pack",    PackTab(nb),    "Pack (files → .neo)"),
+            ("verify",  VerifyTab(nb),  "Verify (Roundtrip)"),
+            ("info",    InfoTab(nb),    "Info (.neo)"),
         ]:
+            self._tabs[key] = tab
             nb.add(tab, text=label)
+            if hasattr(tab, "apply_settings"):
+                tab.apply_settings(self._settings.get(key, {}))
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        data = {}
+        for key, tab in self._tabs.items():
+            if hasattr(tab, "export_settings"):
+                data[key] = tab.export_settings()
+        try:
+            _save_settings(data)
+        except Exception:
+            pass
+        self.destroy()
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +249,7 @@ class _FileRow(ttk.Frame):
             b = ttk.Button(self, text=text, command=cmd)
             b.grid(row=0, column=3 + i, sticky="w", padx=(6 if i == 0 else 4, 0))
             self._extra_buttons.append(b)
+        self._enable_drop()
 
     def _browse(self):
         p = (filedialog.askopenfilename(filetypes=self._ft) if self._mode == "open"
@@ -180,6 +261,24 @@ class _FileRow(ttk.Frame):
     @property
     def value(self) -> str:
         return self.var.get().strip()
+
+    def _enable_drop(self) -> None:
+        if not _DND_AVAILABLE:
+            return
+        try:
+            self.entry.drop_target_register(DND_FILES)  # type: ignore[attr-defined]
+            self.entry.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
+        except Exception:
+            # Drag-and-drop depends on TkDND availability at runtime.
+            pass
+
+    def _on_drop(self, event) -> None:
+        try:
+            paths = self.tk.splitlist(event.data)
+            if paths:
+                self.var.set(paths[0])
+        except Exception:
+            pass
 
 
 class _LogBox(scrolledtext.ScrolledText):
@@ -233,6 +332,7 @@ class ExtractTab(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self._is_running = False
+        self._cancel_event = threading.Event()
         self._build()
 
     def _build(self):
@@ -281,8 +381,15 @@ class ExtractTab(ttk.Frame):
         self._c_size = _SizeCombo(row2, "C Chip Size:", _C_CHIP_SIZES, "auto (C_total ÷ 2)")
         self._c_size.pack(side="left")
 
-        self._run_btn = ttk.Button(self, text="Extract", command=self._run)
-        self._run_btn.pack(**pad)
+        ctrl_row = ttk.Frame(self)
+        ctrl_row.pack(fill="x", padx=8, pady=3)
+        self._run_btn = ttk.Button(ctrl_row, text="Extract", command=self._run)
+        self._run_btn.grid(row=0, column=0, padx=(0, 8))
+        self._cancel_btn = ttk.Button(ctrl_row, text="Cancel", command=self._request_cancel, state="disabled")
+        self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
+        self._progress = ttk.Progressbar(ctrl_row, mode="indeterminate", length=180)
+        self._progress.grid(row=0, column=2, sticky="w")
+        ctrl_row.columnconfigure(3, weight=1)
         self._log = _LogBox(self)
         self._plain_log = tk.BooleanVar(value=False)
         ttk.Checkbutton(
@@ -312,14 +419,21 @@ class ExtractTab(ttk.Frame):
         self._log.clear()
         self._is_running = True
         self._run_btn.config(state="disabled")
+        self._cancel_btn.config(state="normal")
+        self._cancel_event.clear()
+        self._progress.start(10)
 
         def work():
             try:
+                if self._cancel_event.is_set():
+                    raise RuntimeError("Operation cancelled by user.")
                 neo_data    = neo_path.read_bytes()
                 romset      = parse_neo(neo_data)
                 c_chip_size = _c_chip_size_from_str(self._c_size.value_str, len(romset.c))
                 self._log.append(f"Reading: {neo_path}")
                 self._log.append(f"C chip size: {c_chip_size:,} bytes")
+                if self._cancel_event.is_set():
+                    raise RuntimeError("Operation cancelled by user.")
 
                 if mode == "dir":
                     out_dir = Path(self._out_dir_var.get()) if self._out_dir_var.get() \
@@ -350,6 +464,39 @@ class ExtractTab(ttk.Frame):
     def _finish_run(self):
         self._is_running = False
         self._run_btn.config(state="normal")
+        self._cancel_btn.config(state="disabled")
+        self._progress.stop()
+
+    def _request_cancel(self):
+        self._cancel_event.set()
+        self._log.append("⚠️  Cancellation requested... waiting for safe stop.")
+
+    def export_settings(self) -> dict:
+        return {
+            "input": self._neo.value,
+            "output_mode": self._out_mode.get(),
+            "output_zip": self._out_zip.value,
+            "output_dir": self._out_dir_var.get(),
+            "prefix": self._prefix.get(),
+            "format": self._fmt.get(),
+            "c_chip_size": self._c_size.value_str,
+            "plain_log": bool(self._plain_log.get()),
+        }
+
+    def apply_settings(self, data: dict) -> None:
+        if not data:
+            return
+        self._neo.var.set(data.get("input", self._neo.var.get()))
+        self._out_mode.set(data.get("output_mode", self._out_mode.get()))
+        self._out_zip.var.set(data.get("output_zip", self._out_zip.var.get()))
+        self._out_dir_var.set(data.get("output_dir", self._out_dir_var.get()))
+        self._prefix.set(data.get("prefix", self._prefix.get()))
+        self._fmt.set(data.get("format", self._fmt.get()))
+        if data.get("c_chip_size"):
+            self._c_size.var.set(data["c_chip_size"])
+        self._plain_log.set(bool(data.get("plain_log", self._plain_log.get())))
+        self._log.set_plain(self._plain_log.get())
+        self._toggle_out()
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +507,8 @@ class PackTab(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self._is_running = False
+        self._cancel_event = threading.Event()
+        self._validate_after_id: str | None = None
         self._build()
 
     def _build(self):
@@ -379,10 +528,12 @@ class PackTab(ttk.Frame):
             ],
         )
         self._inp.pack(fill="x", **pad)
+        self._inp.var.trace_add("write", lambda *_: self._schedule_validation())
 
         self._out = _FileRow(self, "Output .neo:", mode="save",
                              filetypes=[("NEO files", "*.neo"), ("All", "*.*")])
         self._out.pack(fill="x", **pad)
+        self._out.var.trace_add("write", lambda *_: self._schedule_validation())
 
         # Metadata
         meta_frame = ttk.LabelFrame(self, text="Metadata")
@@ -401,6 +552,7 @@ class PackTab(ttk.Frame):
                 row=i, column=0, sticky="w", padx=4, pady=2)
             v = tk.StringVar(value=default)
             self._vars[key] = v
+            v.trace_add("write", lambda *_: self._schedule_validation())
             if key == "name":
                 _enforce_latin1_byte_limit(v, 32)
             elif key == "mfr":
@@ -411,6 +563,7 @@ class PackTab(ttk.Frame):
         ttk.Label(meta_frame, text="Genre:", width=14, anchor="w").grid(
             row=gr, column=0, sticky="w", padx=4, pady=2)
         self._genre = tk.StringVar(value="Other")
+        self._genre.trace_add("write", lambda *_: self._schedule_validation())
         ttk.Combobox(meta_frame, textvariable=self._genre,
                      values=list(GENRES.values()), state="readonly", width=16
                      ).grid(row=gr, column=1, sticky="w", padx=4)
@@ -425,6 +578,7 @@ class PackTab(ttk.Frame):
             row=0, column=0, sticky="w", padx=4, pady=2
         )
         self._swap_p = tk.StringVar(value="auto")
+        self._swap_p.trace_add("write", lambda *_: self._schedule_validation())
         radios = ttk.Frame(opt_frame)
         radios.grid(row=0, column=1, sticky="w", padx=4, pady=2)
         ttk.Radiobutton(
@@ -444,8 +598,18 @@ class PackTab(ttk.Frame):
             variable=self._diagnostic,
         ).grid(row=1, column=0, columnspan=2, sticky="w", padx=4, pady=2)
 
-        self._run_btn = ttk.Button(self, text="Pack → .neo", command=self._run)
-        self._run_btn.pack(**pad)
+        ctrl_row = ttk.Frame(self)
+        ctrl_row.pack(fill="x", padx=8, pady=3)
+        self._run_btn = ttk.Button(ctrl_row, text="Pack → .neo", command=self._run)
+        self._run_btn.grid(row=0, column=0, padx=(0, 8))
+        self._cancel_btn = ttk.Button(ctrl_row, text="Cancel", command=self._request_cancel, state="disabled")
+        self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
+        self._progress = ttk.Progressbar(ctrl_row, mode="indeterminate", length=180)
+        self._progress.grid(row=0, column=2, sticky="w")
+        self._status_var = tk.StringVar(value="Status: waiting for input")
+        self._status_label = tk.Label(ctrl_row, textvariable=self._status_var, anchor="w")
+        self._status_label.grid(row=0, column=3, sticky="w", padx=(10, 0))
+        ctrl_row.columnconfigure(3, weight=1)
         self._log = _LogBox(self)
         self._plain_log = tk.BooleanVar(value=False)
         ttk.Checkbutton(
@@ -455,6 +619,7 @@ class PackTab(ttk.Frame):
             command=lambda: self._log.set_plain(self._plain_log.get()),
         ).pack(anchor="w", padx=12)
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
+        self._schedule_validation()
 
     def _run(self):
         if self._is_running:
@@ -489,9 +654,14 @@ class PackTab(ttk.Frame):
         self._log.clear()
         self._is_running = True
         self._run_btn.config(state="disabled")
+        self._cancel_btn.config(state="normal")
+        self._cancel_event.clear()
+        self._progress.start(10)
 
         def work():
             try:
+                if self._cancel_event.is_set():
+                    raise RuntimeError("Operation cancelled by user.")
                 self._log.append(f"Packing: {src}")
 
                 # Auto-swap: Diagnose ins Log (nicht nochmal auf stdout)
@@ -502,6 +672,8 @@ class PackTab(ttk.Frame):
                     needed, reason = detect_swap_p_needed(rs_probe.p)
                     tag = "auto-swap: YES —" if needed else "auto-swap: no  —"
                     self._log.append(f"  {tag} {reason}")
+                if self._cancel_event.is_set():
+                    raise RuntimeError("Operation cancelled by user.")
 
                 fn = mame_dir_to_neo if src.is_dir() else mame_zip_to_neo
                 swap_verbose = swap_p != "auto"
@@ -528,6 +700,8 @@ class PackTab(ttk.Frame):
                 for warning_msg in captured:
                     msg = str(warning_msg.message)
                     self._log.append(f"⚠️  {msg}")
+                if self._cancel_event.is_set():
+                    raise RuntimeError("Operation cancelled by user.")
                 dest = out or src.with_suffix(".neo")
                 dest.write_bytes(neo_data)
                 self._log.append(f"Written: {dest}  ({len(neo_data)/1024/1024:.2f} MB)")
@@ -542,6 +716,107 @@ class PackTab(ttk.Frame):
     def _finish_run(self):
         self._is_running = False
         self._run_btn.config(state="normal")
+        self._cancel_btn.config(state="disabled")
+        self._progress.stop()
+        self._schedule_validation()
+
+    def _request_cancel(self):
+        self._cancel_event.set()
+        self._log.append("⚠️  Cancellation requested... waiting for safe stop.")
+
+    def _set_status(self, level: str, text: str):
+        colors = {"ok": "#2e7d32", "warn": "#8a6d3b", "error": "#b71c1c"}
+        self._status_var.set(f"Status: {text}")
+        self._status_label.config(fg=colors.get(level, "#444444"))
+
+    def _schedule_validation(self):
+        if self._validate_after_id:
+            self.after_cancel(self._validate_after_id)
+        self._validate_after_id = self.after(250, self._validate_inputs)
+
+    def _validate_inputs(self):
+        self._validate_after_id = None
+        src_text = self._inp.value
+        if not src_text:
+            self._set_status("warn", "input ZIP or directory is empty")
+            return
+
+        src = Path(src_text)
+        if not src.exists():
+            self._set_status("error", "input path does not exist")
+            return
+        if not (src.is_dir() or zipfile.is_zipfile(src)):
+            self._set_status("error", "input must be a directory or ZIP file")
+            return
+
+        for k in ("year", "ngh", "screenshot"):
+            v = self._vars[k].get().strip()
+            if not v:
+                self._set_status("warn", f"{k} is empty")
+                return
+            try:
+                n = int(v)
+            except ValueError:
+                self._set_status("error", f"{k} must be an integer")
+                return
+            if n < 0:
+                self._set_status("error", f"{k} must be >= 0")
+                return
+
+        if not self._vars["name"].get().strip():
+            self._set_status("warn", "name is empty")
+            return
+        if not self._vars["mfr"].get().strip():
+            self._set_status("warn", "manufacturer is empty")
+            return
+
+        try:
+            roles = _scan_required_roles(src)
+            missing = [r for r in ("P", "S", "M") if r not in roles]
+            if missing:
+                self._set_status(
+                    "warn",
+                    f"missing required ROM role(s): {', '.join(missing)} "
+                    "(expect p1/s1/m1 naming)",
+                )
+                return
+        except Exception:
+            self._set_status("warn", "could not inspect input roles yet")
+            return
+
+        self._set_status("ok", "ready to pack")
+
+    def export_settings(self) -> dict:
+        return {
+            "input": self._inp.value,
+            "output": self._out.value,
+            "name": self._vars["name"].get(),
+            "manufacturer": self._vars["mfr"].get(),
+            "year": self._vars["year"].get(),
+            "ngh": self._vars["ngh"].get(),
+            "screenshot": self._vars["screenshot"].get(),
+            "genre": self._genre.get(),
+            "swap_mode": self._swap_p.get(),
+            "diagnostic": bool(self._diagnostic.get()),
+            "plain_log": bool(self._plain_log.get()),
+        }
+
+    def apply_settings(self, data: dict) -> None:
+        if not data:
+            return
+        self._inp.var.set(data.get("input", self._inp.var.get()))
+        self._out.var.set(data.get("output", self._out.var.get()))
+        self._vars["name"].set(data.get("name", self._vars["name"].get()))
+        self._vars["mfr"].set(data.get("manufacturer", self._vars["mfr"].get()))
+        self._vars["year"].set(data.get("year", self._vars["year"].get()))
+        self._vars["ngh"].set(data.get("ngh", self._vars["ngh"].get()))
+        self._vars["screenshot"].set(data.get("screenshot", self._vars["screenshot"].get()))
+        self._genre.set(data.get("genre", self._genre.get()))
+        self._swap_p.set(data.get("swap_mode", self._swap_p.get()))
+        self._diagnostic.set(bool(data.get("diagnostic", self._diagnostic.get())))
+        self._plain_log.set(bool(data.get("plain_log", self._plain_log.get())))
+        self._log.set_plain(self._plain_log.get())
+        self._schedule_validation()
 
 
 # ---------------------------------------------------------------------------
@@ -552,6 +827,7 @@ class VerifyTab(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self._is_running = False
+        self._cancel_event = threading.Event()
         self._build()
 
     def _build(self):
@@ -588,8 +864,15 @@ class VerifyTab(ttk.Frame):
         self._c_size = _SizeCombo(row2, "C Chip Size:", _C_CHIP_SIZES, "auto (C_total ÷ 2)")
         self._c_size.grid(row=0, column=0, sticky="w")
 
-        self._run_btn = ttk.Button(self, text="Verify Roundtrip", command=self._run)
-        self._run_btn.pack(**pad)
+        ctrl_row = ttk.Frame(self)
+        ctrl_row.pack(fill="x", padx=8, pady=3)
+        self._run_btn = ttk.Button(ctrl_row, text="Verify Roundtrip", command=self._run)
+        self._run_btn.grid(row=0, column=0, padx=(0, 8))
+        self._cancel_btn = ttk.Button(ctrl_row, text="Cancel", command=self._request_cancel, state="disabled")
+        self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
+        self._progress = ttk.Progressbar(ctrl_row, mode="indeterminate", length=180)
+        self._progress.grid(row=0, column=2, sticky="w")
+        ctrl_row.columnconfigure(3, weight=1)
         self._log = _LogBox(self, height=12)
         self._plain_log = tk.BooleanVar(value=False)
         ttk.Checkbutton(
@@ -612,9 +895,14 @@ class VerifyTab(ttk.Frame):
         self._log.clear()
         self._is_running = True
         self._run_btn.config(state="disabled")
+        self._cancel_btn.config(state="normal")
+        self._cancel_event.clear()
+        self._progress.start(10)
 
         def work():
             try:
+                if self._cancel_event.is_set():
+                    raise RuntimeError("Operation cancelled by user.")
                 original    = neo_path.read_bytes()
                 original_rs = parse_neo(original)
                 c_chip_size = _c_chip_size_from_str(self._c_size.value_str, len(original_rs.c))
@@ -622,6 +910,8 @@ class VerifyTab(ttk.Frame):
                 self._log.append("Step 1: Extracting ROM data…")
                 zip_data = extract_romset_to_zip(original_rs, name_prefix=prefix,
                                                  fmt=fmt, c_chip_size=c_chip_size)
+                if self._cancel_event.is_set():
+                    raise RuntimeError("Operation cancelled by user.")
                 self._log.append("Step 2: Repacking to .neo…")
                 meta = original_rs.meta
                 with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tf:
@@ -631,6 +921,8 @@ class VerifyTab(ttk.Frame):
                     rebuilt = mame_zip_to_neo(tmp_zip, meta)
                 finally:
                     tmp_zip.unlink(missing_ok=True)
+                if self._cancel_event.is_set():
+                    raise RuntimeError("Operation cancelled by user.")
                 self._log.append("Step 3: Comparing ROM data regions…")
                 result = verify_roundtrip(original, rebuilt)
                 self._log.append("")
@@ -650,6 +942,32 @@ class VerifyTab(ttk.Frame):
     def _finish_run(self):
         self._is_running = False
         self._run_btn.config(state="normal")
+        self._cancel_btn.config(state="disabled")
+        self._progress.stop()
+
+    def _request_cancel(self):
+        self._cancel_event.set()
+        self._log.append("⚠️  Cancellation requested... waiting for safe stop.")
+
+    def export_settings(self) -> dict:
+        return {
+            "input": self._neo.value,
+            "prefix": self._prefix.get(),
+            "format": self._fmt.get(),
+            "c_chip_size": self._c_size.value_str,
+            "plain_log": bool(self._plain_log.get()),
+        }
+
+    def apply_settings(self, data: dict) -> None:
+        if not data:
+            return
+        self._neo.var.set(data.get("input", self._neo.var.get()))
+        self._prefix.set(data.get("prefix", self._prefix.get()))
+        self._fmt.set(data.get("format", self._fmt.get()))
+        if data.get("c_chip_size"):
+            self._c_size.var.set(data["c_chip_size"])
+        self._plain_log.set(bool(data.get("plain_log", self._plain_log.get())))
+        self._log.set_plain(self._plain_log.get())
 
 
 # ---------------------------------------------------------------------------
@@ -697,6 +1015,19 @@ class InfoTab(ttk.Frame):
             self._log.append(f"❌ Could not read file: {e}")
         except Exception as e:
             self._log.append(f"❌ Unexpected error: {type(e).__name__}: {e}")
+
+    def export_settings(self) -> dict:
+        return {
+            "input": self._neo.value,
+            "plain_log": bool(self._plain_log.get()),
+        }
+
+    def apply_settings(self, data: dict) -> None:
+        if not data:
+            return
+        self._neo.var.set(data.get("input", self._neo.var.get()))
+        self._plain_log.set(bool(data.get("plain_log", self._plain_log.get())))
+        self._log.set_plain(self._plain_log.get())
 
 
 # ---------------------------------------------------------------------------
