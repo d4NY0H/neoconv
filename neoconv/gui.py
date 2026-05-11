@@ -87,7 +87,8 @@ class NeoConvApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"neoconv {__version__}")
-        self.resizable(False, False)
+        # Allow resizing so the log area can grow on demand.
+        self.resizable(True, True)
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
         for tab, label in [
@@ -104,18 +105,37 @@ class NeoConvApp(tk.Tk):
 # ---------------------------------------------------------------------------
 
 class _FileRow(ttk.Frame):
-    def __init__(self, parent, label: str, mode: str = "open",
-                 filetypes=None, label_width: int = 14, **kw):
+    def __init__(
+        self,
+        parent,
+        label: str,
+        mode: str = "open",
+        filetypes=None,
+        label_width: int = 14,
+        entry_width: int = 42,
+        extra_buttons: list[tuple[str, callable]] | None = None,
+        **kw,
+    ):
         super().__init__(parent, **kw)
         self._mode = mode
         self._ft   = filetypes or []
+
+        # Grid-based layout for consistent alignment and better resizing
+        self.columnconfigure(1, weight=1)
+
         self.label = ttk.Label(self, text=label, width=label_width, anchor="w")
-        self.label.pack(side="left")
+        self.label.grid(row=0, column=0, sticky="w")
         self.var = tk.StringVar()
-        self.entry = ttk.Entry(self, textvariable=self.var, width=42)
-        self.entry.pack(side="left", padx=4)
+        self.entry = ttk.Entry(self, textvariable=self.var, width=entry_width)
+        self.entry.grid(row=0, column=1, sticky="ew", padx=4)
         self.button = ttk.Button(self, text="Browse…", command=self._browse)
-        self.button.pack(side="left")
+        self.button.grid(row=0, column=2, sticky="w")
+
+        self._extra_buttons: list[ttk.Button] = []
+        for i, (text, cmd) in enumerate(extra_buttons or []):
+            b = ttk.Button(self, text=text, command=cmd)
+            b.grid(row=0, column=3 + i, sticky="w", padx=(6 if i == 0 else 4, 0))
+            self._extra_buttons.append(b)
 
     def _browse(self):
         p = (filedialog.askopenfilename(filetypes=self._ft) if self._mode == "open"
@@ -193,18 +213,11 @@ class ExtractTab(ttk.Frame):
                                  filetypes=[("ZIP", "*.zip")], label_width=1)
         self._out_zip.grid(row=0, column=1, sticky="ew", padx=4)
 
-        self._out_dir_var = tk.StringVar()
-        dir_row = ttk.Frame(out_frame)
-        dir_row.grid(row=1, column=1, sticky="ew", padx=4)
-        self._out_dir_entry = ttk.Entry(dir_row, textvariable=self._out_dir_var, width=38)
-        self._out_dir_entry.pack(side="left", padx=4)
-        self._out_dir_button = ttk.Button(
-            dir_row, text="Browse…",
-            command=lambda: self._out_dir_var.set(
-                filedialog.askdirectory() or self._out_dir_var.get()
-            ),
-        )
-        self._out_dir_button.pack(side="left")
+        self._out_dir = _FileRow(out_frame, "", mode="opendir", label_width=1)
+        self._out_dir.grid(row=1, column=1, sticky="ew", padx=4)
+        self._out_dir_var = self._out_dir.var
+        self._out_dir_entry = self._out_dir.entry
+        self._out_dir_button = self._out_dir.button
         out_frame.columnconfigure(1, weight=1)
 
         # Prefix + format
@@ -301,13 +314,20 @@ class PackTab(ttk.Frame):
     def _build(self):
         pad = {"padx": 8, "pady": 3}
 
-        self._inp = _FileRow(self, "Input ZIP/Dir:",
-                             filetypes=[("ZIP files", "*.zip"), ("All", "*.*")])
+        self._inp = _FileRow(
+            self,
+            "Input ZIP/Dir:",
+            filetypes=[("ZIP files", "*.zip"), ("All", "*.*")],
+            extra_buttons=[
+                (
+                    "Pick dir…",
+                    lambda: self._inp.var.set(
+                        filedialog.askdirectory() or self._inp.value
+                    ),
+                )
+            ],
+        )
         self._inp.pack(fill="x", **pad)
-        ttk.Button(self, text="…or pick directory",
-                   command=lambda: self._inp.var.set(
-                       filedialog.askdirectory() or self._inp.value)
-                   ).pack(anchor="w", padx=80)
 
         self._out = _FileRow(self, "Output .neo:", mode="save",
                              filetypes=[("NEO files", "*.neo"), ("All", "*.*")])
@@ -316,6 +336,7 @@ class PackTab(ttk.Frame):
         # Metadata
         meta_frame = ttk.LabelFrame(self, text="Metadata")
         meta_frame.pack(fill="x", padx=8, pady=4)
+        meta_frame.columnconfigure(1, weight=1)
         fields = [
             ("Name:",         "name",       "Unknown"),
             ("Manufacturer:", "mfr",        "Unknown"),
@@ -329,8 +350,8 @@ class PackTab(ttk.Frame):
                 row=i, column=0, sticky="w", padx=4, pady=2)
             v = tk.StringVar(value=default)
             self._vars[key] = v
-            ttk.Entry(meta_frame, textvariable=v, width=30).grid(
-                row=i, column=1, sticky="w", padx=4)
+            ttk.Entry(meta_frame, textvariable=v).grid(
+                row=i, column=1, sticky="ew", padx=4)
         gr = len(fields)
         ttk.Label(meta_frame, text="Genre:", width=14, anchor="w").grid(
             row=gr, column=0, sticky="w", padx=4, pady=2)
@@ -342,26 +363,31 @@ class PackTab(ttk.Frame):
         # Options
         opt_frame = ttk.LabelFrame(self, text="Options")
         opt_frame.pack(fill="x", padx=8, pady=4)
+        opt_frame.columnconfigure(1, weight=1)
 
-        # P-ROM swap: 3-way radio (no / auto / yes)
-        swap_row = ttk.Frame(opt_frame)
-        swap_row.pack(anchor="w", padx=4, pady=2)
-        ttk.Label(swap_row, text="P-ROM Bank Swap:", width=18, anchor="w").pack(side="left")
+        # P-ROM swap: keep label aligned; radios wrapped into two lines
+        ttk.Label(opt_frame, text="P-ROM Bank Swap:", width=18, anchor="w").grid(
+            row=0, column=0, sticky="w", padx=4, pady=2
+        )
         self._swap_p = tk.StringVar(value="auto")
-        for val, label in [
-            ("no",   "No  (never swap)"),
-            ("auto", "Auto-detect  (default)"),
-            ("yes",  "Yes  (always swap)"),
-        ]:
-            ttk.Radiobutton(swap_row, text=label, variable=self._swap_p,
-                            value=val).pack(side="left", padx=(0, 10))
+        radios = ttk.Frame(opt_frame)
+        radios.grid(row=0, column=1, sticky="w", padx=4, pady=2)
+        ttk.Radiobutton(
+            radios, text="No  (never swap)", variable=self._swap_p, value="no"
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Radiobutton(
+            radios, text="Auto-detect  (default)", variable=self._swap_p, value="auto"
+        ).grid(row=0, column=1, sticky="w")
+        ttk.Radiobutton(
+            radios, text="Yes  (always swap)", variable=self._swap_p, value="yes"
+        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
 
         self._diagnostic = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             opt_frame,
             text="Diagnostic mode  (log warnings for unrecognized files)",
             variable=self._diagnostic,
-        ).pack(anchor="w", padx=4, pady=2)
+        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=4, pady=2)
 
         self._run_btn = ttk.Button(self, text="Pack → .neo", command=self._run)
         self._run_btn.pack(**pad)
