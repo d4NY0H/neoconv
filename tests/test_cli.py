@@ -32,7 +32,7 @@ def _verify_args(path: Path) -> argparse.Namespace:
     return argparse.Namespace(neo_file=str(path), prefix="", format="mame")
 
 
-def test_cmd_verify_success_uses_ascii_markers(monkeypatch, tmp_path, capsys):
+def test_cmd_verify_success_exit_code_and_output(monkeypatch, tmp_path, capsys):
     neo_path = tmp_path / "input.neo"
     neo_path.write_bytes(b"neo")
 
@@ -50,7 +50,7 @@ def test_cmd_verify_success_uses_ascii_markers(monkeypatch, tmp_path, capsys):
     assert "[OK] PASS - extraction is lossless." in out
 
 
-def test_cmd_verify_failure_uses_ascii_markers(monkeypatch, tmp_path, capsys):
+def test_cmd_verify_failure_exit_code_and_output(monkeypatch, tmp_path, capsys):
     neo_path = tmp_path / "input.neo"
     neo_path.write_bytes(b"neo")
 
