@@ -1,0 +1,166 @@
+name: Manual Release with binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 1.0.1)"
+        required: true
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Validate version, build Python sdist/wheel, create tag + draft release
+  # ---------------------------------------------------------------------------
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ github.event.inputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Validate version
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          python - <<'PY'
+          import pathlib, re, tomllib, os, sys
+
+          version = os.environ["VERSION"].strip()
+          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+              print(f"Invalid version format: {version} (expected x.y.z)")
+              sys.exit(1)
+
+          pyproject = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+          project_version = pyproject["project"]["version"]
+
+          init_text = pathlib.Path("neoconv/__init__.py").read_text()
+          m = re.search(r'__version__\s*=\s*"([^"]+)"', init_text)
+          if not m:
+              print("Could not find __version__ in neoconv/__init__.py")
+              sys.exit(1)
+          init_version = m.group(1)
+
+          if project_version != version or init_version != version:
+              print("Version mismatch detected:")
+              print(f"  workflow input     : {version}")
+              print(f"  pyproject.toml     : {project_version}")
+              print(f"  neoconv/__init__.py: {init_version}")
+              sys.exit(1)
+          print(f"Version check passed: {version}")
+          PY
+
+      - name: Build Python distribution (sdist + wheel)
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Create and push tag
+        env:
+          TAG: ${{ github.event.inputs.version }}
+        run: |
+          git rev-parse "$TAG" >/dev/null 2>&1 && {
+            echo "Tag '$TAG' already exists."
+            exit 1
+          }
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      - name: Create draft GitHub release with Python packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.version }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --title "$TAG" \
+            --draft
+
+  # ---------------------------------------------------------------------------
+  # 2. Build native GUI binaries (Windows, macOS, Linux) and upload to release
+  # ---------------------------------------------------------------------------
+  build-gui:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+            binary_name: neoconv-gui.exe
+            asset_suffix: windows.exe
+          - os: macos-latest
+            label: macos
+            binary_name: neoconv-gui
+            asset_suffix: macos
+          - os: ubuntu-latest
+            label: linux
+            binary_name: neoconv-gui
+            asset_suffix: linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          python -m pip install -e .
+
+      - name: Create GUI entry-point script
+        shell: python
+        run: |
+          import pathlib
+          pathlib.Path("_gui_entry.py").write_text(
+              "from neoconv.gui import main\nif __name__ == '__main__':\n    main()\n"
+          )
+
+      - name: Build with PyInstaller
+        run: pyinstaller --onefile --windowed --name neoconv-gui _gui_entry.py
+
+      - name: Locate and rename binary (Windows)
+        if: matrix.label == 'windows'
+        shell: pwsh
+        run: |
+          $version = "${{ needs.prepare.outputs.tag }}"
+          $src = Get-ChildItem -Recurse -Filter "neoconv-gui.exe" dist/ | Select-Object -First 1
+          $dest = "neoconv-gui-$version-${{ matrix.asset_suffix }}"
+          Copy-Item $src.FullName $dest
+          echo "ASSET_PATH=$dest" >> $env:GITHUB_ENV
+
+      - name: Locate and rename binary (macOS / Linux)
+        if: matrix.label != 'windows'
+        run: |
+          VERSION="${{ needs.prepare.outputs.tag }}"
+          SRC=$(find dist -maxdepth 1 -name "neoconv-gui" -type f | head -1)
+          DEST="neoconv-gui-${VERSION}-${{ matrix.asset_suffix }}"
+          cp "$SRC" "$DEST"
+          echo "ASSET_PATH=$DEST" >> $GITHUB_ENV
+
+      - name: Upload binary to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        shell: bash
+        run: |
+          gh release upload "$TAG" "$ASSET_PATH" --clobber
