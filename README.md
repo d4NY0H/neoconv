@@ -82,7 +82,19 @@ brew install python tcl-tk
 
 ---
 
-## Installation (project)
+## Installation
+
+### Prebuilt GUI binaries (Windows, macOS, Linux)
+
+Download the latest binary from the [Releases](https://github.com/d4NY0H/neoconv/releases) page — no Python installation required.
+
+| Platform | File |
+|----------|------|
+| Windows | `neoconv-gui-x.y.z-windows.exe` — run directly |
+| macOS | `neoconv-gui-x.y.z-macos.zip` — unzip, then double-click `neoconv-gui.app` (first launch: right-click → Open to bypass Gatekeeper) |
+| Linux | `neoconv-gui-x.y.z-linux` — `chmod +x`, then run |
+
+### Installation (project)
 
 ```bash
 git clone https://github.com/d4NY0H/neoconv
@@ -121,12 +133,14 @@ neoconv-gui
 python3 -m neoconv.gui
 ```
 
+All file inputs support **drag and drop** — drop a `.neo` file or a MAME ZIP directly onto the relevant tab.
+
 Tabs:
 
 | Tab | Description |
 |-----|-------------|
 | **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory, including C chip size selection |
-| **Pack** | Build `.neo` from ZIP/folder with metadata, optional P swap, and diagnostics |
+| **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap mode selectable via radio (`auto` / `yes` / `no`) |
 | **Verify** | Run full roundtrip verification with selectable format and C chip size |
 | **Info** | Inspect metadata and ROM region sizes from a `.neo` file |
 
@@ -162,7 +176,7 @@ neoconv extract input.neo --prefix game --c-chip-size 4194304 --out game_customc
 | `--format`, `-f` | `mame` | Output format: `mame` (`.bin`) or `darksoft` (`.rom`) |
 | `--out`, `-o` | *(auto)* | Output ZIP path |
 | `--out-dir`, `-d` | — | Extract to directory instead of ZIP |
-| `--c-chip-size` | `0` (auto) | C chip size in bytes; `0` auto-derives from total C region |
+| `--c-chip-size` | `0` (auto) | C chip size in bytes; `0` = auto (derives `C_total / 2`). Use `2097152` (2 MB) for most games, `4194304` (4 MB) for games with larger chips (e.g. Neo Turf Masters) |
 
 ### `pack` - ROM files -> `.neo`
 
@@ -268,9 +282,11 @@ Step 1: Extract -> mame ZIP
 Step 2: Repack ZIP -> .neo
 Step 3: Compare ROM data regions
 
-✅ PASS — extraction is lossless.
+[OK] PASS - extraction is lossless.
   Original ROM MD5 : aed6010ef6d15d2dba1a4422e70fc822
   Rebuilt  ROM MD5 : aed6010ef6d15d2dba1a4422e70fc822
+  File size match  : True
+  Details          : ROM data identical
 ```
 
 ---
