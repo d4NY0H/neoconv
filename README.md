@@ -2,7 +2,7 @@
 
 > A preservation-focused utility for converting between **TerraOnion `.neo` containers** and **MAME / Darksoft Neo Geo ROM sets** with bit-perfect verification.
 
-`neoconv` handles C-ROM byte-interleaving, optional P-ROM bank swapping, V-ROM chunking, metadata, and lossless roundtrip verification. It is designed for commercial dumps, hacks, CD conversions, and homebrew.
+`neoconv` handles C-ROM byte-interleaving, **P-ROM half-swap** (default: **auto-detect** from the M68000 vector table, with `yes` / `no` overrides), V-ROM chunking, metadata, and lossless roundtrip verification. It is designed for commercial dumps, hacks, CD conversions, and homebrew.
 
 ---
 
@@ -14,7 +14,7 @@ Most Neo Geo conversion tools are one-way, outdated, or fragile with non-standar
 |----------|-------------|
 | **Reliable** | Integrated `verify` checks your exact ROM data, not a global CRC database |
 | **Universal** | Handles commercial sets, hacks, CD conversions, and homebrew |
-| **Transparent** | C interleaving, P swap, and V chunking are explicit and documented |
+| **Transparent** | C interleaving, P-ROM swap (auto or manual), and V chunking are explicit and documented |
 | **Configurable** | Selectable C chip size per title (2 MB default, 4 MB for some games) |
 | **Dual interface** | CLI and GUI expose the same core workflows |
 
@@ -30,7 +30,8 @@ Both interfaces support the same core workflows:
 | Pack MAME ZIP or directory to `.neo` | ✅ | ✅ |
 | Bit-perfect roundtrip verify | ✅ | ✅ |
 | View `.neo` metadata and region sizes | ✅ | ✅ |
-| P-ROM bank swap option (`--swap-p`) | ✅ | ✅ |
+| P-ROM bank swap (auto-detect + manual override) | ✅ | ✅ |
+| Inspect P-ROM and report swap recommendation | ✅ | — |
 | Diagnostic mode for unrecognized files | ✅ | ✅ |
 
 ---
@@ -184,8 +185,14 @@ neoconv pack ./roms/ \
   --ngh 149 \
   --out mygame.neo
 
-# With P-ROM bank swap (exactly 2 MB P-ROM only)
-neoconv pack kof94.zip --name "KOF 94" --ngh 149 --swap-p --out kof94.neo
+# With P-ROM bank swap auto-detect (default — recommended)
+neoconv pack kof94.zip --name "KOF 94" --ngh 55 --out kof94.neo
+
+# Force swap (explicit override)
+neoconv pack kof94.zip --name "KOF 94" --ngh 55 --swap-p yes --out kof94.neo
+
+# Never swap (opt out of auto-detect)
+neoconv pack mygame.zip --name "My Game" --ngh 200 --swap-p no --out mygame.neo
 
 # Diagnostic output for unrecognized files
 neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
@@ -200,7 +207,7 @@ neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
 | `--ngh` | `0` | NGH number (decimal integer) |
 | `--screenshot` | `0` | TerraOnion screenshot index |
 | `--out`, `-o` | *(input stem + `.neo`)* | Output `.neo` path |
-| `--swap-p` | off | Swap two 1 MB halves of a 2 MB P-ROM |
+| `--swap-p` | `auto` | P-ROM half-swap mode: `auto` (heuristic, default), `yes` (always), `no` (never) |
 | `--diagnostic` | off | Warn on unrecognized filenames |
 
 Available genres: `Other`, `Action`, `BeatEmUp`, `Sports`, `Driving`, `Platformer`, `Mahjong`, `Shooter`, `Quiz`, `Fighting`, `Puzzle`
@@ -216,6 +223,23 @@ neoconv verify game.neo --prefix zin
 |--------|---------|-------------|
 | `--prefix`, `-p` | *(input stem)* | Prefix for intermediate extraction |
 | `--format`, `-f` | `mame` | Intermediate format: `mame` or `darksoft` |
+
+### `detect-swap` - inspect P-ROM swap requirement
+
+```bash
+neoconv detect-swap kof94te.zip
+neoconv detect-swap turfmast.zip
+```
+
+Inspects the M68000 vector table in both 1 MB halves of a 2 MB P-ROM and reports whether `--swap-p yes` is needed. Works with raw P-ROM files or MAME ZIPs.
+
+Example output:
+
+```
+Inspecting P-ROM from ZIP: kof94te.zip  (2,097,152 bytes)
+  Result  : --swap-p yes  ← required
+  Reason  : Second half has valid vectors (SP=0x0010F300, Reset=0x00C00402) — swap required.
+```
 
 ### `info` - display `.neo` metadata
 
@@ -278,7 +302,17 @@ C chips always come in pairs. Interleaved bank size is `chip_size * 2`.
 
 ### P-ROM bank swap (`--swap-p`)
 
-Some early SNK titles require swapped 1 MB halves inside a 2 MB P-ROM. Use `--swap-p` only for titles that require it.
+Some early SNK titles (KOF94, Neo Turf Masters, and their hacks) store their 2 MB P-ROM with the two 1 MB halves in reversed order relative to what TerraOnion NeoSD / MiSTer expect.
+
+`neoconv` detects this automatically by inspecting the M68000 exception-vector table (initial Stack Pointer + Reset PC) in both halves. The half carrying valid values — SP in Work RAM (`0x100000–0x10FFFF`), Reset PC in ROM or BIOS (`0x000100–0x1FFFFF` or `0xC00000–0xC7FFFF`) — determines whether a swap is applied.
+
+| Mode | Behaviour |
+|------|-----------|
+| `auto` (default) | Detect from vector table; prints a diagnostic line |
+| `yes` | Always swap — for titles where auto-detect is ambiguous |
+| `no` | Never swap — to opt out explicitly |
+
+Use `neoconv detect-swap <zip>` to inspect a dump without packing it.
 
 ### V-ROM chunking
 

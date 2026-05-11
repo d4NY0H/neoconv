@@ -449,3 +449,114 @@ class TestDiagnosticMode:
 
         with pytest.raises(ValueError, match="Duplicate ROM role"):
             parse_mame_zip(zip_path, diagnostic=False)
+
+
+# ---------------------------------------------------------------------------
+# detect_swap_p_needed
+# ---------------------------------------------------------------------------
+
+def _make_valid_vectors(sp: int = 0x0010F300, rst: int = 0x00C00402) -> bytes:
+    """
+    Build a plausible 8-byte M68000 vector table (SP + Reset PC) in
+    MAME word-swapped storage format (odd byte first per 16-bit word).
+    """
+    sp_be  = sp.to_bytes(4, "big")
+    rst_be = rst.to_bytes(4, "big")
+    native = sp_be + rst_be  # big-endian as the 68k sees it
+    # Word-swap to MAME storage format
+    swapped = bytearray(8)
+    for i in range(0, 8, 2):
+        swapped[i]     = native[i + 1]
+        swapped[i + 1] = native[i]
+    return bytes(swapped)
+
+
+def _make_2mb_p_rom(valid_in_first: bool) -> bytes:
+    """
+    Return a synthetic 2 MB P-ROM where exactly one half contains a
+    valid M68k vector table in MAME word-swapped format.
+    """
+    HALF = P_SWAP_SIZE // 2
+    valid_half   = _make_valid_vectors() + make_rom(HALF - 8, 0x00)
+    invalid_half = make_rom(HALF, 0xFF)  # 0xFFFF… is not a valid SP/Reset
+    if valid_in_first:
+        return valid_half + invalid_half
+    else:
+        return invalid_half + valid_half
+
+
+class TestDetectSwapP:
+    def test_valid_first_half_no_swap(self):
+        from neoconv.core import detect_swap_p_needed
+        p = _make_2mb_p_rom(valid_in_first=True)
+        needed, reason = detect_swap_p_needed(p)
+        assert not needed
+        assert "no swap" in reason.lower() or "first half" in reason.lower()
+
+    def test_valid_second_half_swap_needed(self):
+        from neoconv.core import detect_swap_p_needed
+        p = _make_2mb_p_rom(valid_in_first=False)
+        needed, reason = detect_swap_p_needed(p)
+        assert needed
+        assert "swap" in reason.lower()
+
+    def test_non_2mb_returns_false(self):
+        from neoconv.core import detect_swap_p_needed
+        for size in [512 * 1024, 1024 * 1024, 4 * 1024 * 1024]:
+            needed, reason = detect_swap_p_needed(make_rom(size))
+            assert not needed
+            assert "not 2 mb" in reason.lower() or "2 mb" in reason.lower()
+
+    def test_neither_valid_returns_false(self):
+        from neoconv.core import detect_swap_p_needed
+        # All 0xFF — no valid vectors anywhere
+        p = make_rom(P_SWAP_SIZE, 0xFF)
+        needed, reason = detect_swap_p_needed(p)
+        assert not needed
+        assert "inconclusive" in reason.lower() or "neither" in reason.lower()
+
+    def test_both_valid_prefers_first_no_swap(self):
+        from neoconv.core import detect_swap_p_needed
+        HALF = P_SWAP_SIZE // 2
+        half1 = _make_valid_vectors(sp=0x0010F300, rst=0x00000200) + make_rom(HALF - 8, 0x00)
+        half2 = _make_valid_vectors(sp=0x0010E000, rst=0x00100200) + make_rom(HALF - 8, 0x00)
+        p = half1 + half2
+        needed, reason = detect_swap_p_needed(p)
+        assert not needed  # first half preferred
+
+    def test_bios_reset_vector_accepted(self):
+        """Reset vector pointing into BIOS (0xC00000-0xC7FFFF) must be valid."""
+        from neoconv.core import detect_swap_p_needed
+        # KOF94/NTM pattern: SP in RAM, Reset in BIOS
+        p = _make_2mb_p_rom(valid_in_first=False)  # valid in second half
+        needed, _ = detect_swap_p_needed(p)
+        assert needed
+
+    def test_auto_swap_applies_when_needed(self):
+        """mame_zip_to_neo with swap_p='auto' swaps only when needed."""
+        from neoconv.core import RomSet, NeoMeta, build_neo, _apply_swap_p
+        p_with_valid_second = _make_2mb_p_rom(valid_in_first=False)
+        rs = RomSet(
+            p=p_with_valid_second,
+            s=make_rom(128 * 1024),
+            m=make_rom(128 * 1024),
+            v=make_rom(2 * 1024 * 1024),
+            c=_interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE)]),
+        )
+        rs_after = _apply_swap_p(rs, "auto", verbose=False)
+        HALF = P_SWAP_SIZE // 2
+        # After auto-swap the first half must be the originally-second half
+        assert rs_after.p[:HALF] == p_with_valid_second[HALF:]
+
+    def test_auto_swap_no_op_when_not_needed(self):
+        from neoconv.core import RomSet, _apply_swap_p
+        p_with_valid_first = _make_2mb_p_rom(valid_in_first=True)
+        rs = RomSet(
+            p=p_with_valid_first,
+            s=make_rom(128 * 1024),
+            m=make_rom(128 * 1024),
+            v=make_rom(2 * 1024 * 1024),
+            c=_interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE)]),
+        )
+        rs_after = _apply_swap_p(rs, "auto", verbose=False)
+        assert rs_after.p == p_with_valid_first  # unchanged

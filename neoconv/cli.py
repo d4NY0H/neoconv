@@ -40,6 +40,7 @@ from .core import (
     GENRE_BY_NAME,
     NeoMeta,
     build_neo,
+    detect_swap_p_needed,
     extract_neo,
     extract_neo_to_zip,
     mame_dir_to_neo,
@@ -147,12 +148,21 @@ def cmd_pack(args: argparse.Namespace) -> None:
     meta = _meta_from_args(args)
     out_path = Path(args.out) if args.out else src.with_suffix(".neo")
 
+    # --swap-p choices: "auto" | "yes" | "no"
+    raw = args.swap_p
+    if raw == "yes":
+        swap_p: "bool | str" = True
+    elif raw == "auto":
+        swap_p = "auto"
+    else:
+        swap_p = False
+
     if src.is_dir():
         print(f"Packing directory: {src}")
-        neo_data = mame_dir_to_neo(src, meta, swap_p=args.swap_p, diagnostic=args.diagnostic)
+        neo_data = mame_dir_to_neo(src, meta, swap_p=swap_p, diagnostic=args.diagnostic)
     elif zipfile.is_zipfile(src):
         print(f"Packing ZIP: {src}")
-        neo_data = mame_zip_to_neo(src, meta, swap_p=args.swap_p, diagnostic=args.diagnostic)
+        neo_data = mame_zip_to_neo(src, meta, swap_p=swap_p, diagnostic=args.diagnostic)
     else:
         print(f"Error: input must be a directory or ZIP file.", file=sys.stderr)
         sys.exit(1)
@@ -160,6 +170,31 @@ def cmd_pack(args: argparse.Namespace) -> None:
     out_path.write_bytes(neo_data)
     print(f"Written: {out_path}")
     _print_neo_info(neo_data)
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: detect-swap
+# ---------------------------------------------------------------------------
+
+def cmd_detect_swap(args: argparse.Namespace) -> None:
+    """Inspect a P-ROM and report whether --swap-p yes is needed."""
+    import zipfile as _zf
+    src = Path(args.input)
+    if not src.exists():
+        print(f"Error: file not found: {src}", file=sys.stderr)
+        sys.exit(1)
+
+    if _zf.is_zipfile(src):
+        romset = parse_mame_zip(src)
+        p_rom = romset.p
+        print(f"Inspecting P-ROM from ZIP: {src}  ({len(p_rom):,} bytes)")
+    else:
+        p_rom = src.read_bytes()
+        print(f"Inspecting P-ROM file: {src}  ({len(p_rom):,} bytes)")
+
+    needed, reason = detect_swap_p_needed(p_rom)
+    print(f"  Result  : {'--swap-p yes  ← required' if needed else '--swap-p no   (default)'}")
+    print(f"  Reason  : {reason}")
 
 
 # ---------------------------------------------------------------------------
@@ -265,18 +300,31 @@ def build_parser() -> argparse.ArgumentParser:
     p_pack.add_argument("--ngh", type=int, default=0, help="NGH number")
     p_pack.add_argument("--screenshot", type=int, default=0, help="Screenshot number (TerraOnion)")
     p_pack.add_argument(
-        "--swap-p", action="store_true", default=False,
+        "--swap-p",
+        choices=["auto", "yes", "no"],
+        default="auto",
+        dest="swap_p",
         help=(
-            "Swap the two 1 MB halves of a 2 MB P-ROM before packing. "
-            "Required for some early SNK titles with P-ROM banking (e.g. early KOF). "
-            "Only valid for exactly 2 MB P-ROMs. Do NOT use unless you know the game needs it."
-        )
+            "P-ROM half-swap mode for 2 MB P-ROMs. "
+            "'auto' = heuristic: inspect the M68k vector table and swap only "
+            "when the second half carries valid SP/Reset vectors (default). "
+            "'yes'  = always swap (legacy behaviour of the old --swap-p flag). "
+            "'no'   = never swap."
+        ),
     )
     p_pack.add_argument(
         "--diagnostic", action="store_true", default=False,
         help="Print a warning for every file that was not recognized, to help diagnose naming issues."
     )
     p_pack.set_defaults(func=cmd_pack)
+
+    # -- detect-swap --
+    p_detect = sub.add_parser(
+        "detect-swap",
+        help="Inspect a P-ROM (raw file or inside a MAME ZIP) and report whether --swap-p is needed.",
+    )
+    p_detect.add_argument("input", help="Raw P-ROM file or MAME ZIP containing a *-p1.* file.")
+    p_detect.set_defaults(func=cmd_detect_swap)
 
     # -- verify --
     p_verify = sub.add_parser(

@@ -20,6 +20,7 @@ from .core import (
     GENRE_BY_NAME,
     GENRES,
     NeoMeta,
+    detect_swap_p_needed,
     extract_romset,
     extract_romset_to_zip,
     mame_dir_to_neo,
@@ -341,12 +342,20 @@ class PackTab(ttk.Frame):
         # Options
         opt_frame = ttk.LabelFrame(self, text="Options")
         opt_frame.pack(fill="x", padx=8, pady=4)
-        self._swap_p = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            opt_frame,
-            text="P-ROM Bank Swap  (early SNK titles with 2 MB P-ROM — use only if needed)",
-            variable=self._swap_p,
-        ).pack(anchor="w", padx=4, pady=2)
+
+        # P-ROM swap: 3-way radio (no / auto / yes)
+        swap_row = ttk.Frame(opt_frame)
+        swap_row.pack(anchor="w", padx=4, pady=2)
+        ttk.Label(swap_row, text="P-ROM Bank Swap:", width=18, anchor="w").pack(side="left")
+        self._swap_p = tk.StringVar(value="auto")
+        for val, label in [
+            ("no",   "No  (never swap)"),
+            ("auto", "Auto-detect  (default)"),
+            ("yes",  "Yes  (always swap)"),
+        ]:
+            ttk.Radiobutton(swap_row, text=label, variable=self._swap_p,
+                            value=val).pack(side="left", padx=(0, 10))
+
         self._diagnostic = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             opt_frame,
@@ -382,7 +391,12 @@ class PackTab(ttk.Frame):
             ngh=ngh,
             screenshot=screenshot,
         )
-        swap_p     = self._swap_p.get()
+        swap_p_raw = self._swap_p.get()          # "no" | "auto" | "yes"
+        swap_p: bool | str = (
+            True  if swap_p_raw == "yes"  else
+            "auto" if swap_p_raw == "auto" else
+            False
+        )
         diagnostic = self._diagnostic.get()
         self._log.clear()
         self._is_running = True
@@ -391,15 +405,38 @@ class PackTab(ttk.Frame):
         def work():
             try:
                 self._log.append(f"Packing: {src}")
+
+                # Auto-swap: Diagnose ins Log (nicht nochmal auf stdout)
+                if swap_p == "auto":
+                    from .core import parse_mame_dir, parse_mame_zip
+
+                    rs_probe = (parse_mame_dir if src.is_dir() else parse_mame_zip)(src)
+                    needed, reason = detect_swap_p_needed(rs_probe.p)
+                    tag = "auto-swap: YES —" if needed else "auto-swap: no  —"
+                    self._log.append(f"  {tag} {reason}")
+
                 fn = mame_dir_to_neo if src.is_dir() else mame_zip_to_neo
+                swap_verbose = swap_p != "auto"
                 captured: list[warnings.WarningMessage] = []
                 if diagnostic:
                     with warnings.catch_warnings(record=True) as caught:
                         warnings.simplefilter("always")
-                        neo_data = fn(src, meta, swap_p=swap_p, diagnostic=True)
+                        neo_data = fn(
+                            src,
+                            meta,
+                            swap_p=swap_p,
+                            diagnostic=True,
+                            swap_verbose=swap_verbose,
+                        )
                     captured = list(caught)
                 else:
-                    neo_data = fn(src, meta, swap_p=swap_p, diagnostic=False)
+                    neo_data = fn(
+                        src,
+                        meta,
+                        swap_p=swap_p,
+                        diagnostic=False,
+                        swap_verbose=swap_verbose,
+                    )
                 for warning_msg in captured:
                     msg = str(warning_msg.message)
                     self._log.append(f"⚠️  {msg}")
