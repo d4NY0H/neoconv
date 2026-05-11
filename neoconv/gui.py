@@ -79,6 +79,38 @@ def _set_controls_state(controls: list[tk.Widget], enabled: bool) -> None:
         ctrl.config(state=state)
 
 
+def _enforce_latin1_byte_limit(var: tk.StringVar, max_bytes: int) -> None:
+    """
+    Hard-limit a StringVar to *max_bytes* when encoded as latin-1 with
+    errors="replace", matching the .neo header packing logic.
+
+    This truncates the value immediately (prevents typing past the limit),
+    rather than allowing the user to enter longer strings that would be
+    silently truncated later.
+    """
+    in_callback = False
+
+    def _on_write(*_args) -> None:
+        nonlocal in_callback
+        if in_callback:
+            return
+
+        s = var.get()
+        b = s.encode("latin-1", errors="replace")
+        if len(b) <= max_bytes:
+            return
+
+        # Truncate by bytes but keep a valid string for the widget
+        truncated = b[:max_bytes].decode("latin-1", errors="ignore")
+        in_callback = True
+        try:
+            var.set(truncated)
+        finally:
+            in_callback = False
+
+    var.trace_add("write", _on_write)
+
+
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
@@ -350,6 +382,10 @@ class PackTab(ttk.Frame):
                 row=i, column=0, sticky="w", padx=4, pady=2)
             v = tk.StringVar(value=default)
             self._vars[key] = v
+            if key == "name":
+                _enforce_latin1_byte_limit(v, 32)
+            elif key == "mfr":
+                _enforce_latin1_byte_limit(v, 16)
             ttk.Entry(meta_frame, textvariable=v).grid(
                 row=i, column=1, sticky="ew", padx=4)
         gr = len(fields)
