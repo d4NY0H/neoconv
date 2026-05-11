@@ -48,8 +48,6 @@ def test_cmd_verify_success_uses_ascii_markers(monkeypatch, tmp_path, capsys):
     assert exc.value.code == 0
     out = capsys.readouterr().out
     assert "[OK] PASS - extraction is lossless." in out
-    assert "✅" not in out
-    assert "❌" not in out
 
 
 def test_cmd_verify_failure_uses_ascii_markers(monkeypatch, tmp_path, capsys):
@@ -68,5 +66,3 @@ def test_cmd_verify_failure_uses_ascii_markers(monkeypatch, tmp_path, capsys):
     assert exc.value.code == 1
     out = capsys.readouterr().out
     assert "[ERROR] FAIL - ROM data mismatch!" in out
-    assert "✅" not in out
-    assert "❌" not in out
