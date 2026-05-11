@@ -296,8 +296,18 @@ class _LogBox(scrolledtext.ScrolledText):
         if not self._plain:
             return text
         # Replace symbols with ASCII markers for terminals/fonts where emoji render poorly.
-        text = text.replace("✅", "[OK]").replace("❌", "[ERROR]").replace("⚠️", "[WARN]")
-        return re.sub(r"\s{2,}", " ", text)
+        text = (
+            text.replace("✅", "[OK]")
+            .replace("❌", "[ERROR]")
+            .replace("⚠️", "[WARN]")
+            .replace("⚠", "[WARN]")
+            .replace("…", "...")
+            .replace("→", "->")
+            .replace("—", "-")
+        )
+        # Final hard ASCII fallback to guarantee plain output.
+        text = text.encode("ascii", errors="ignore").decode("ascii")
+        return re.sub(r"\s{2,}", " ", text).strip()
 
     def clear(self):
         self.config(state="normal"); self.delete("1.0", "end"); self.config(state="disabled")
@@ -398,6 +408,7 @@ class ExtractTab(ttk.Frame):
             variable=self._plain_log,
             command=lambda: self._log.set_plain(self._plain_log.get()),
         ).pack(anchor="w", padx=12)
+        ttk.Button(self, text="Reset defaults", command=self._reset_defaults).pack(anchor="w", padx=12, pady=(0, 4))
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
         self._toggle_out()
 
@@ -496,6 +507,19 @@ class ExtractTab(ttk.Frame):
             self._c_size.var.set(data["c_chip_size"])
         self._plain_log.set(bool(data.get("plain_log", self._plain_log.get())))
         self._log.set_plain(self._plain_log.get())
+        self._toggle_out()
+
+    def _reset_defaults(self):
+        self._neo.var.set("")
+        self._out_mode.set("zip")
+        self._out_zip.var.set("")
+        self._out_dir_var.set("")
+        self._prefix.set("")
+        self._fmt.set("mame")
+        self._c_size.var.set("auto (C_total ÷ 2)")
+        self._plain_log.set(False)
+        self._log.set_plain(False)
+        self._progress.config(value=0)
         self._toggle_out()
 
 
@@ -604,7 +628,7 @@ class PackTab(ttk.Frame):
         self._run_btn.grid(row=0, column=0, padx=(0, 8))
         self._cancel_btn = ttk.Button(ctrl_row, text="Cancel", command=self._request_cancel, state="disabled")
         self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
-        self._progress = ttk.Progressbar(ctrl_row, mode="indeterminate", length=180)
+        self._progress = ttk.Progressbar(ctrl_row, mode="determinate", length=220, maximum=4, value=0)
         self._progress.grid(row=0, column=2, sticky="w")
         self._status_var = tk.StringVar(value="Status: waiting for input")
         self._status_label = tk.Label(ctrl_row, textvariable=self._status_var, anchor="w")
@@ -618,6 +642,7 @@ class PackTab(ttk.Frame):
             variable=self._plain_log,
             command=lambda: self._log.set_plain(self._plain_log.get()),
         ).pack(anchor="w", padx=12)
+        ttk.Button(self, text="Reset defaults", command=self._reset_defaults).pack(anchor="w", padx=12, pady=(0, 4))
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
         self._schedule_validation()
 
@@ -656,13 +681,14 @@ class PackTab(ttk.Frame):
         self._run_btn.config(state="disabled")
         self._cancel_btn.config(state="normal")
         self._cancel_event.clear()
-        self._progress.start(10)
+        self._progress.config(mode="determinate", maximum=4, value=0)
 
         def work():
             try:
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
                 self._log.append(f"Packing: {src}")
+                self.after(0, lambda: self._progress.config(value=1))
 
                 # Auto-swap: Diagnose ins Log (nicht nochmal auf stdout)
                 if swap_p == "auto":
@@ -697,6 +723,7 @@ class PackTab(ttk.Frame):
                         diagnostic=False,
                         swap_verbose=swap_verbose,
                     )
+                self.after(0, lambda: self._progress.config(value=2))
                 for warning_msg in captured:
                     msg = str(warning_msg.message)
                     self._log.append(f"⚠️  {msg}")
@@ -704,8 +731,10 @@ class PackTab(ttk.Frame):
                     raise RuntimeError("Operation cancelled by user.")
                 dest = out or src.with_suffix(".neo")
                 dest.write_bytes(neo_data)
+                self.after(0, lambda: self._progress.config(value=3))
                 self._log.append(f"Written: {dest}  ({len(neo_data)/1024/1024:.2f} MB)")
                 self._log.append("✅ Done.")
+                self.after(0, lambda: self._progress.config(value=4))
             except Exception as e:
                 self._log.append(f"❌ Error: {e}")
             finally:
@@ -717,7 +746,6 @@ class PackTab(ttk.Frame):
         self._is_running = False
         self._run_btn.config(state="normal")
         self._cancel_btn.config(state="disabled")
-        self._progress.stop()
         self._schedule_validation()
 
     def _request_cancel(self):
@@ -818,6 +846,22 @@ class PackTab(ttk.Frame):
         self._log.set_plain(self._plain_log.get())
         self._schedule_validation()
 
+    def _reset_defaults(self):
+        self._inp.var.set("")
+        self._out.var.set("")
+        self._vars["name"].set("Unknown")
+        self._vars["mfr"].set("Unknown")
+        self._vars["year"].set("0")
+        self._vars["ngh"].set("0")
+        self._vars["screenshot"].set("0")
+        self._genre.set("Other")
+        self._swap_p.set("auto")
+        self._diagnostic.set(False)
+        self._plain_log.set(False)
+        self._log.set_plain(False)
+        self._progress.config(value=0)
+        self._schedule_validation()
+
 
 # ---------------------------------------------------------------------------
 # Verify tab
@@ -870,7 +914,7 @@ class VerifyTab(ttk.Frame):
         self._run_btn.grid(row=0, column=0, padx=(0, 8))
         self._cancel_btn = ttk.Button(ctrl_row, text="Cancel", command=self._request_cancel, state="disabled")
         self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
-        self._progress = ttk.Progressbar(ctrl_row, mode="indeterminate", length=180)
+        self._progress = ttk.Progressbar(ctrl_row, mode="determinate", length=220, maximum=4, value=0)
         self._progress.grid(row=0, column=2, sticky="w")
         ctrl_row.columnconfigure(3, weight=1)
         self._log = _LogBox(self, height=12)
@@ -881,6 +925,7 @@ class VerifyTab(ttk.Frame):
             variable=self._plain_log,
             command=lambda: self._log.set_plain(self._plain_log.get()),
         ).pack(anchor="w", padx=12)
+        ttk.Button(self, text="Reset defaults", command=self._reset_defaults).pack(anchor="w", padx=12, pady=(0, 4))
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
 
     def _run(self):
@@ -897,7 +942,7 @@ class VerifyTab(ttk.Frame):
         self._run_btn.config(state="disabled")
         self._cancel_btn.config(state="normal")
         self._cancel_event.clear()
-        self._progress.start(10)
+        self._progress.config(mode="determinate", maximum=4, value=0)
 
         def work():
             try:
@@ -907,11 +952,13 @@ class VerifyTab(ttk.Frame):
                 original_rs = parse_neo(original)
                 c_chip_size = _c_chip_size_from_str(self._c_size.value_str, len(original_rs.c))
                 self._log.append(f"Reading: {neo_path}")
+                self.after(0, lambda: self._progress.config(value=1))
                 self._log.append("Step 1: Extracting ROM data…")
                 zip_data = extract_romset_to_zip(original_rs, name_prefix=prefix,
                                                  fmt=fmt, c_chip_size=c_chip_size)
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
+                self.after(0, lambda: self._progress.config(value=2))
                 self._log.append("Step 2: Repacking to .neo…")
                 meta = original_rs.meta
                 with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tf:
@@ -923,6 +970,7 @@ class VerifyTab(ttk.Frame):
                     tmp_zip.unlink(missing_ok=True)
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
+                self.after(0, lambda: self._progress.config(value=3))
                 self._log.append("Step 3: Comparing ROM data regions…")
                 result = verify_roundtrip(original, rebuilt)
                 self._log.append("")
@@ -932,6 +980,7 @@ class VerifyTab(ttk.Frame):
                 self._log.append(f"  Rebuilt  ROM MD5 : {result.rebuilt_rom_md5}")
                 self._log.append(f"  File size match  : {result.file_size_match}")
                 self._log.append(f"  Details          : {result.details}")
+                self.after(0, lambda: self._progress.config(value=4))
             except Exception as e:
                 self._log.append(f"❌ Error: {e}")
             finally:
@@ -943,7 +992,6 @@ class VerifyTab(ttk.Frame):
         self._is_running = False
         self._run_btn.config(state="normal")
         self._cancel_btn.config(state="disabled")
-        self._progress.stop()
 
     def _request_cancel(self):
         self._cancel_event.set()
@@ -968,6 +1016,15 @@ class VerifyTab(ttk.Frame):
             self._c_size.var.set(data["c_chip_size"])
         self._plain_log.set(bool(data.get("plain_log", self._plain_log.get())))
         self._log.set_plain(self._plain_log.get())
+
+    def _reset_defaults(self):
+        self._neo.var.set("")
+        self._prefix.set("")
+        self._fmt.set("mame")
+        self._c_size.var.set("auto (C_total ÷ 2)")
+        self._plain_log.set(False)
+        self._log.set_plain(False)
+        self._progress.config(value=0)
 
 
 # ---------------------------------------------------------------------------
@@ -997,6 +1054,7 @@ class InfoTab(ttk.Frame):
             variable=self._plain_log,
             command=lambda: self._log.set_plain(self._plain_log.get()),
         ).pack(anchor="w", padx=12)
+        ttk.Button(self, text="Reset defaults", command=self._reset_defaults).pack(anchor="w", padx=12, pady=(0, 4))
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
 
     def _run(self):
@@ -1028,6 +1086,11 @@ class InfoTab(ttk.Frame):
         self._neo.var.set(data.get("input", self._neo.var.get()))
         self._plain_log.set(bool(data.get("plain_log", self._plain_log.get())))
         self._log.set_plain(self._plain_log.get())
+
+    def _reset_defaults(self):
+        self._neo.var.set("")
+        self._plain_log.set(False)
+        self._log.set_plain(False)
 
 
 # ---------------------------------------------------------------------------
