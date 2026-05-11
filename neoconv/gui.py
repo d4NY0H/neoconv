@@ -12,7 +12,6 @@ import sys
 import tempfile
 import threading
 import tkinter as tk
-import re
 import warnings
 import zipfile
 from pathlib import Path
@@ -187,6 +186,9 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self.resizable(True, True)
         self._settings = _load_settings()
         self._tabs: dict[str, tk.Widget] = {}
+        toolbar = ttk.Frame(self)
+        toolbar.pack(fill="x", padx=8, pady=(8, 0))
+        ttk.Button(toolbar, text="Reset all tabs", command=self._reset_all_tabs).pack(side="right")
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
         for key, tab, label in [
@@ -211,6 +213,11 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         except Exception:
             pass
         self.destroy()
+
+    def _reset_all_tabs(self):
+        for tab in self._tabs.values():
+            if hasattr(tab, "reset_defaults"):
+                tab.reset_defaults()
 
 
 # ---------------------------------------------------------------------------
@@ -287,34 +294,13 @@ class _LogBox(scrolledtext.ScrolledText):
         kw.setdefault("state", "disabled")
         kw.setdefault("font", ("Courier", 9))
         super().__init__(parent, **kw)
-        self._plain = False
-
-    def set_plain(self, enabled: bool) -> None:
-        self._plain = bool(enabled)
-
-    def _plain_text(self, text: str) -> str:
-        if not self._plain:
-            return text
-        # Replace symbols with ASCII markers for terminals/fonts where emoji render poorly.
-        text = (
-            text.replace("✅", "[OK]")
-            .replace("❌", "[ERROR]")
-            .replace("⚠️", "[WARN]")
-            .replace("⚠", "[WARN]")
-            .replace("…", "...")
-            .replace("→", "->")
-            .replace("—", "-")
-        )
-        # Final hard ASCII fallback to guarantee plain output.
-        text = text.encode("ascii", errors="ignore").decode("ascii")
-        return re.sub(r"\s{2,}", " ", text).strip()
 
     def clear(self):
         self.config(state="normal"); self.delete("1.0", "end"); self.config(state="disabled")
 
     def append(self, text: str):
         self.config(state="normal")
-        self.insert("end", self._plain_text(text) + "\n")
+        self.insert("end", text + "\n")
         self.see("end")
         self.config(state="disabled")
 
@@ -401,14 +387,6 @@ class ExtractTab(ttk.Frame):
         self._progress.grid(row=0, column=2, sticky="w")
         ctrl_row.columnconfigure(3, weight=1)
         self._log = _LogBox(self)
-        self._plain_log = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            self,
-            text="Plain log (ASCII only)",
-            variable=self._plain_log,
-            command=lambda: self._log.set_plain(self._plain_log.get()),
-        ).pack(anchor="w", padx=12)
-        ttk.Button(self, text="Reset defaults", command=self._reset_defaults).pack(anchor="w", padx=12, pady=(0, 4))
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
         self._toggle_out()
 
@@ -464,9 +442,9 @@ class ExtractTab(ttk.Frame):
                     with zipfile.ZipFile(dest) as zf:
                         for info in zf.infolist():
                             self._log.append(f"  {info.filename:<30} {info.file_size:>10,} bytes")
-                self._log.append("✅ Done.")
+                self._log.append("[OK] Done.")
             except Exception as e:
-                self._log.append(f"❌ Error: {e}")
+                self._log.append(f"[ERROR] {e}")
             finally:
                 self.after(0, self._finish_run)
 
@@ -480,7 +458,7 @@ class ExtractTab(ttk.Frame):
 
     def _request_cancel(self):
         self._cancel_event.set()
-        self._log.append("⚠️  Cancellation requested... waiting for safe stop.")
+        self._log.append("[WARN] Cancellation requested... waiting for safe stop.")
 
     def export_settings(self) -> dict:
         return {
@@ -491,7 +469,6 @@ class ExtractTab(ttk.Frame):
             "prefix": self._prefix.get(),
             "format": self._fmt.get(),
             "c_chip_size": self._c_size.value_str,
-            "plain_log": bool(self._plain_log.get()),
         }
 
     def apply_settings(self, data: dict) -> None:
@@ -505,11 +482,9 @@ class ExtractTab(ttk.Frame):
         self._fmt.set(data.get("format", self._fmt.get()))
         if data.get("c_chip_size"):
             self._c_size.var.set(data["c_chip_size"])
-        self._plain_log.set(bool(data.get("plain_log", self._plain_log.get())))
-        self._log.set_plain(self._plain_log.get())
         self._toggle_out()
 
-    def _reset_defaults(self):
+    def reset_defaults(self):
         self._neo.var.set("")
         self._out_mode.set("zip")
         self._out_zip.var.set("")
@@ -517,8 +492,6 @@ class ExtractTab(ttk.Frame):
         self._prefix.set("")
         self._fmt.set("mame")
         self._c_size.var.set("auto (C_total ÷ 2)")
-        self._plain_log.set(False)
-        self._log.set_plain(False)
         self._progress.config(value=0)
         self._toggle_out()
 
@@ -635,14 +608,6 @@ class PackTab(ttk.Frame):
         self._status_label.grid(row=0, column=3, sticky="w", padx=(10, 0))
         ctrl_row.columnconfigure(3, weight=1)
         self._log = _LogBox(self)
-        self._plain_log = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            self,
-            text="Plain log (ASCII only)",
-            variable=self._plain_log,
-            command=lambda: self._log.set_plain(self._plain_log.get()),
-        ).pack(anchor="w", padx=12)
-        ttk.Button(self, text="Reset defaults", command=self._reset_defaults).pack(anchor="w", padx=12, pady=(0, 4))
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
         self._schedule_validation()
 
@@ -696,7 +661,7 @@ class PackTab(ttk.Frame):
 
                     rs_probe = (parse_mame_dir if src.is_dir() else parse_mame_zip)(src)
                     needed, reason = detect_swap_p_needed(rs_probe.p)
-                    tag = "auto-swap: YES —" if needed else "auto-swap: no  —"
+                    tag = "auto-swap: YES -" if needed else "auto-swap: no -"
                     self._log.append(f"  {tag} {reason}")
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
@@ -726,17 +691,17 @@ class PackTab(ttk.Frame):
                 self.after(0, lambda: self._progress.config(value=2))
                 for warning_msg in captured:
                     msg = str(warning_msg.message)
-                    self._log.append(f"⚠️  {msg}")
+                    self._log.append(f"[WARN] {msg}")
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
                 dest = out or src.with_suffix(".neo")
                 dest.write_bytes(neo_data)
                 self.after(0, lambda: self._progress.config(value=3))
                 self._log.append(f"Written: {dest}  ({len(neo_data)/1024/1024:.2f} MB)")
-                self._log.append("✅ Done.")
+                self._log.append("[OK] Done.")
                 self.after(0, lambda: self._progress.config(value=4))
             except Exception as e:
-                self._log.append(f"❌ Error: {e}")
+                self._log.append(f"[ERROR] {e}")
             finally:
                 self.after(0, self._finish_run)
 
@@ -750,7 +715,7 @@ class PackTab(ttk.Frame):
 
     def _request_cancel(self):
         self._cancel_event.set()
-        self._log.append("⚠️  Cancellation requested... waiting for safe stop.")
+        self._log.append("[WARN] Cancellation requested... waiting for safe stop.")
 
     def _set_status(self, level: str, text: str):
         colors = {"ok": "#2e7d32", "warn": "#8a6d3b", "error": "#b71c1c"}
@@ -826,7 +791,6 @@ class PackTab(ttk.Frame):
             "genre": self._genre.get(),
             "swap_mode": self._swap_p.get(),
             "diagnostic": bool(self._diagnostic.get()),
-            "plain_log": bool(self._plain_log.get()),
         }
 
     def apply_settings(self, data: dict) -> None:
@@ -842,11 +806,9 @@ class PackTab(ttk.Frame):
         self._genre.set(data.get("genre", self._genre.get()))
         self._swap_p.set(data.get("swap_mode", self._swap_p.get()))
         self._diagnostic.set(bool(data.get("diagnostic", self._diagnostic.get())))
-        self._plain_log.set(bool(data.get("plain_log", self._plain_log.get())))
-        self._log.set_plain(self._plain_log.get())
         self._schedule_validation()
 
-    def _reset_defaults(self):
+    def reset_defaults(self):
         self._inp.var.set("")
         self._out.var.set("")
         self._vars["name"].set("Unknown")
@@ -857,8 +819,6 @@ class PackTab(ttk.Frame):
         self._genre.set("Other")
         self._swap_p.set("auto")
         self._diagnostic.set(False)
-        self._plain_log.set(False)
-        self._log.set_plain(False)
         self._progress.config(value=0)
         self._schedule_validation()
 
@@ -918,14 +878,6 @@ class VerifyTab(ttk.Frame):
         self._progress.grid(row=0, column=2, sticky="w")
         ctrl_row.columnconfigure(3, weight=1)
         self._log = _LogBox(self, height=12)
-        self._plain_log = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            self,
-            text="Plain log (ASCII only)",
-            variable=self._plain_log,
-            command=lambda: self._log.set_plain(self._plain_log.get()),
-        ).pack(anchor="w", padx=12)
-        ttk.Button(self, text="Reset defaults", command=self._reset_defaults).pack(anchor="w", padx=12, pady=(0, 4))
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
 
     def _run(self):
@@ -971,18 +923,18 @@ class VerifyTab(ttk.Frame):
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
                 self.after(0, lambda: self._progress.config(value=3))
-                self._log.append("Step 3: Comparing ROM data regions…")
+                self._log.append("Step 3: Comparing ROM data regions...")
                 result = verify_roundtrip(original, rebuilt)
                 self._log.append("")
-                self._log.append("✅ PASS — extraction is lossless." if result.ok
-                                 else "❌ FAIL — ROM data mismatch!")
+                self._log.append("[OK] PASS - extraction is lossless." if result.ok
+                                 else "[ERROR] FAIL - ROM data mismatch!")
                 self._log.append(f"  Original ROM MD5 : {result.original_rom_md5}")
                 self._log.append(f"  Rebuilt  ROM MD5 : {result.rebuilt_rom_md5}")
                 self._log.append(f"  File size match  : {result.file_size_match}")
                 self._log.append(f"  Details          : {result.details}")
                 self.after(0, lambda: self._progress.config(value=4))
             except Exception as e:
-                self._log.append(f"❌ Error: {e}")
+                self._log.append(f"[ERROR] {e}")
             finally:
                 self.after(0, self._finish_run)
 
@@ -995,7 +947,7 @@ class VerifyTab(ttk.Frame):
 
     def _request_cancel(self):
         self._cancel_event.set()
-        self._log.append("⚠️  Cancellation requested... waiting for safe stop.")
+        self._log.append("[WARN] Cancellation requested... waiting for safe stop.")
 
     def export_settings(self) -> dict:
         return {
@@ -1003,7 +955,6 @@ class VerifyTab(ttk.Frame):
             "prefix": self._prefix.get(),
             "format": self._fmt.get(),
             "c_chip_size": self._c_size.value_str,
-            "plain_log": bool(self._plain_log.get()),
         }
 
     def apply_settings(self, data: dict) -> None:
@@ -1014,16 +965,12 @@ class VerifyTab(ttk.Frame):
         self._fmt.set(data.get("format", self._fmt.get()))
         if data.get("c_chip_size"):
             self._c_size.var.set(data["c_chip_size"])
-        self._plain_log.set(bool(data.get("plain_log", self._plain_log.get())))
-        self._log.set_plain(self._plain_log.get())
 
-    def _reset_defaults(self):
+    def reset_defaults(self):
         self._neo.var.set("")
         self._prefix.set("")
         self._fmt.set("mame")
         self._c_size.var.set("auto (C_total ÷ 2)")
-        self._plain_log.set(False)
-        self._log.set_plain(False)
         self._progress.config(value=0)
 
 
@@ -1047,14 +994,6 @@ class InfoTab(ttk.Frame):
         btn_row.columnconfigure(2, weight=1)
         ttk.Button(btn_row, text="Show Info", command=self._run).grid(row=0, column=1)
         self._log = _LogBox(self, height=14)
-        self._plain_log = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            self,
-            text="Plain log (ASCII only)",
-            variable=self._plain_log,
-            command=lambda: self._log.set_plain(self._plain_log.get()),
-        ).pack(anchor="w", padx=12)
-        ttk.Button(self, text="Reset defaults", command=self._reset_defaults).pack(anchor="w", padx=12, pady=(0, 4))
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
 
     def _run(self):
@@ -1068,29 +1007,24 @@ class InfoTab(ttk.Frame):
             self._log.append(f"File : {neo_path}")
             self._log.append(romset.meta.format_info(romset))
         except ValueError as e:
-            self._log.append(f"❌ Invalid .neo file: {e}")
+            self._log.append(f"[ERROR] Invalid .neo file: {e}")
         except OSError as e:
-            self._log.append(f"❌ Could not read file: {e}")
+            self._log.append(f"[ERROR] Could not read file: {e}")
         except Exception as e:
-            self._log.append(f"❌ Unexpected error: {type(e).__name__}: {e}")
+            self._log.append(f"[ERROR] Unexpected error: {type(e).__name__}: {e}")
 
     def export_settings(self) -> dict:
         return {
             "input": self._neo.value,
-            "plain_log": bool(self._plain_log.get()),
         }
 
     def apply_settings(self, data: dict) -> None:
         if not data:
             return
         self._neo.var.set(data.get("input", self._neo.var.get()))
-        self._plain_log.set(bool(data.get("plain_log", self._plain_log.get())))
-        self._log.set_plain(self._plain_log.get())
 
-    def _reset_defaults(self):
+    def reset_defaults(self):
         self._neo.var.set("")
-        self._plain_log.set(False)
-        self._log.set_plain(False)
 
 
 # ---------------------------------------------------------------------------
