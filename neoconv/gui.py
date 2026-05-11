@@ -537,18 +537,30 @@ class VerifyTab(ttk.Frame):
 
         row = ttk.Frame(self)
         row.pack(fill="x", **pad)
-        ttk.Label(row, text="Prefix:", width=14, anchor="w").pack(side="left")
+        row.columnconfigure(1, weight=1)
+        ttk.Label(row, text="Prefix:", width=14, anchor="w").grid(
+            row=0, column=0, sticky="w"
+        )
         self._prefix = tk.StringVar()
-        ttk.Entry(row, textvariable=self._prefix, width=14).pack(side="left", padx=4)
-        ttk.Label(row, text="Format:", width=8).pack(side="left", padx=(12, 0))
+        ttk.Entry(row, textvariable=self._prefix, width=14).grid(
+            row=0, column=1, sticky="w", padx=4
+        )
+        ttk.Label(row, text="Format:", width=8).grid(
+            row=0, column=2, sticky="w", padx=(12, 0)
+        )
         self._fmt = tk.StringVar(value="mame")
-        ttk.Radiobutton(row, text="MAME",     variable=self._fmt, value="mame").pack(side="left")
-        ttk.Radiobutton(row, text="Darksoft", variable=self._fmt, value="darksoft").pack(side="left")
+        ttk.Radiobutton(row, text="MAME", variable=self._fmt, value="mame").grid(
+            row=0, column=3, sticky="w"
+        )
+        ttk.Radiobutton(row, text="Darksoft", variable=self._fmt, value="darksoft").grid(
+            row=0, column=4, sticky="w"
+        )
 
         row2 = ttk.Frame(self)
         row2.pack(fill="x", **pad)
+        row2.columnconfigure(1, weight=1)
         self._c_size = _SizeCombo(row2, "C Chip Size:", _C_CHIP_SIZES, "auto (C_total ÷ 2)")
-        self._c_size.pack(side="left")
+        self._c_size.grid(row=0, column=0, sticky="w")
 
         self._run_btn = ttk.Button(self, text="Verify Roundtrip", command=self._run)
         self._run_btn.pack(**pad)
@@ -621,7 +633,11 @@ class InfoTab(ttk.Frame):
         self._neo = _FileRow(self, "Input .neo:",
                              filetypes=[("NEO files", "*.neo"), ("All", "*.*")])
         self._neo.pack(fill="x", **pad)
-        ttk.Button(self, text="Show Info", command=self._run).pack(**pad)
+        btn_row = ttk.Frame(self)
+        btn_row.pack(fill="x", **pad)
+        btn_row.columnconfigure(0, weight=1)
+        btn_row.columnconfigure(2, weight=1)
+        ttk.Button(btn_row, text="Show Info", command=self._run).grid(row=0, column=1)
         self._log = _LogBox(self, height=14)
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
 
