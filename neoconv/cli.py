@@ -229,9 +229,9 @@ def cmd_verify(args: argparse.Namespace) -> None:
 
     print()
     if result.ok:
-        print("✅ PASS — extraction is lossless.")
+        print("[OK] PASS - extraction is lossless.")
     else:
-        print("❌ FAIL — ROM data mismatch!")
+        print("[ERROR] FAIL - ROM data mismatch!")
     print(f"  Original ROM MD5 : {result.original_rom_md5}")
     print(f"  Rebuilt  ROM MD5 : {result.rebuilt_rom_md5}")
     print(f"  File size match  : {result.file_size_match}")

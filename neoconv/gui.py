@@ -215,6 +215,13 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self.destroy()
 
     def _reset_all_tabs(self):
+        if any(getattr(tab, "_is_running", False) for tab in self._tabs.values()):
+            messagebox.showwarning(
+                "Reset blocked",
+                "At least one operation is still running. "
+                "Please wait for completion (or cancel first) before resetting.",
+            )
+            return
         for tab in self._tabs.values():
             if hasattr(tab, "reset_defaults"):
                 tab.reset_defaults()
@@ -506,6 +513,11 @@ class PackTab(ttk.Frame):
         self._is_running = False
         self._cancel_event = threading.Event()
         self._validate_after_id: str | None = None
+        self._roles_src_key: tuple | None = None
+        self._roles_missing: list[str] | None = None
+        self._roles_scan_error: str | None = None
+        self._roles_scan_token = 0
+        self._roles_scan_running_token: int | None = None
         self._build()
 
     def _build(self):
@@ -763,21 +775,61 @@ class PackTab(ttk.Frame):
             self._set_status("warn", "manufacturer is empty")
             return
 
-        try:
-            roles = _scan_required_roles(src)
-            missing = [r for r in ("P", "S", "M") if r not in roles]
-            if missing:
-                self._set_status(
-                    "warn",
-                    f"missing required ROM role(s): {', '.join(missing)} "
-                    "(expect p1/s1/m1 naming)",
-                )
-                return
-        except Exception:
+        src_key = self._source_key(src)
+        if src_key != self._roles_src_key:
+            self._roles_src_key = src_key
+            self._roles_missing = None
+            self._roles_scan_error = None
+            self._roles_scan_token += 1
+            self._start_roles_scan(src, src_key, self._roles_scan_token)
+            self._set_status("warn", "inspecting input roles...")
+            return
+
+        if self._roles_scan_running_token is not None:
+            self._set_status("warn", "inspecting input roles...")
+            return
+
+        if self._roles_scan_error is not None:
             self._set_status("warn", "could not inspect input roles yet")
             return
 
+        if self._roles_missing:
+            self._set_status(
+                "warn",
+                f"missing required ROM role(s): {', '.join(self._roles_missing)} "
+                "(expect p1/s1/m1 naming)",
+            )
+            return
+
         self._set_status("ok", "ready to pack")
+
+    def _source_key(self, src: Path) -> tuple:
+        st = src.stat()
+        return (str(src.resolve()), src.is_dir(), st.st_mtime_ns, st.st_size)
+
+    def _start_roles_scan(self, src: Path, src_key: tuple, token: int) -> None:
+        self._roles_scan_running_token = token
+
+        def work() -> None:
+            missing: list[str] = []
+            error: str | None = None
+            try:
+                roles = _scan_required_roles(src)
+                missing = [r for r in ("P", "S", "M") if r not in roles]
+            except Exception as e:
+                error = str(e)
+
+            def finish() -> None:
+                if token != self._roles_scan_token or src_key != self._roles_src_key:
+                    return
+                self._roles_scan_running_token = None
+                self._roles_scan_error = error
+                self._roles_missing = None if error else missing
+                self._schedule_validation()
+
+            self.after(0, finish)
+
+        _run_in_thread(work)
 
     def export_settings(self) -> dict:
         return {
@@ -820,6 +872,11 @@ class PackTab(ttk.Frame):
         self._swap_p.set("auto")
         self._diagnostic.set(False)
         self._progress.config(value=0)
+        self._roles_src_key = None
+        self._roles_missing = None
+        self._roles_scan_error = None
+        self._roles_scan_token += 1
+        self._roles_scan_running_token = None
         self._schedule_validation()
 
 
