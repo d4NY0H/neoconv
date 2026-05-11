@@ -144,16 +144,16 @@ python3 -m neoconv <command> [options]
 
 ```bash
 # MAME ZIP
-neoconv extract game.neo --prefix zin --format mame --out zintrckbp.zip
+neoconv extract input.neo --prefix game --format mame --out game_mame.zip
 
 # Darksoft ZIP
-neoconv extract game.neo --prefix zin --format darksoft --out zin_darksoft.zip
+neoconv extract input.neo --prefix game --format darksoft --out game_darksoft.zip
 
 # Output directory
-neoconv extract game.neo --prefix zin --format mame --out-dir ./roms/
+neoconv extract input.neo --prefix game --format mame --out-dir ./roms/
 
 # Explicit C chip size (example: 4 MB chips)
-neoconv extract turfmast.neo --prefix 200 --c-chip-size 4194304 --out turfmast.zip
+neoconv extract input.neo --prefix game --c-chip-size 4194304 --out game_customc.zip
 ```
 
 | Option | Default | Description |
@@ -168,31 +168,31 @@ neoconv extract turfmast.neo --prefix 200 --c-chip-size 4194304 --out turfmast.z
 
 ```bash
 # From MAME ZIP
-neoconv pack zintrckbp.zip \
-  --name "Zintrick CD Conversion" \
-  --manufacturer "ADK" \
-  --year 1996 \
+neoconv pack input.zip \
+  --name "Example Game" \
+  --manufacturer "Example Studio" \
+  --year 1995 \
   --genre Sports \
-  --ngh 224 \
-  --out zintrick.neo
+  --ngh 100 \
+  --out output.neo
 
 # From directory
 neoconv pack ./roms/ \
   --name "My Game" \
-  --manufacturer "SNK" \
+  --manufacturer "Example Studio" \
   --year 1994 \
   --genre Fighting \
   --ngh 149 \
   --out mygame.neo
 
 # With P-ROM bank swap auto-detect (default — recommended)
-neoconv pack kof94.zip --name "KOF 94" --ngh 55 --out kof94.neo
+neoconv pack input.zip --name "Example Game" --ngh 100 --out output_auto.neo
 
 # Force swap (explicit override)
-neoconv pack kof94.zip --name "KOF 94" --ngh 55 --swap-p yes --out kof94.neo
+neoconv pack input.zip --name "Example Game" --ngh 100 --swap-p yes --out output_swap_yes.neo
 
 # Never swap (opt out of auto-detect)
-neoconv pack mygame.zip --name "My Game" --ngh 200 --swap-p no --out mygame.neo
+neoconv pack input.zip --name "Example Game" --ngh 100 --swap-p no --out output_swap_no.neo
 
 # Diagnostic output for unrecognized files
 neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
@@ -215,7 +215,7 @@ Available genres: `Other`, `Action`, `BeatEmUp`, `Sports`, `Driving`, `Platforme
 ### `verify` - lossless roundtrip check
 
 ```bash
-neoconv verify game.neo --prefix zin
+neoconv verify input.neo --prefix game
 # Exit code: 0 = PASS, 1 = FAIL
 ```
 
@@ -227,8 +227,8 @@ neoconv verify game.neo --prefix zin
 ### `detect-swap` - inspect P-ROM swap requirement
 
 ```bash
-neoconv detect-swap kof94te.zip
-neoconv detect-swap turfmast.zip
+neoconv detect-swap input.zip
+neoconv detect-swap input-p1.bin
 ```
 
 Inspects the M68000 vector table in both 1 MB halves of a 2 MB P-ROM and reports whether `--swap-p yes` is needed. Works with raw P-ROM files or MAME ZIPs.
@@ -236,7 +236,7 @@ Inspects the M68000 vector table in both 1 MB halves of a 2 MB P-ROM and reports
 Example output:
 
 ```
-Inspecting P-ROM from ZIP: kof94te.zip  (2,097,152 bytes)
+Inspecting P-ROM from ZIP: input.zip  (2,097,152 bytes)
   Result  : --swap-p yes  ← required
   Reason  : Second half has valid vectors (SP=0x0010F300, Reset=0x00C00402) — swap required.
 ```
@@ -244,7 +244,7 @@ Inspecting P-ROM from ZIP: kof94te.zip  (2,097,152 bytes)
 ### `info` - display `.neo` metadata
 
 ```bash
-neoconv info game.neo
+neoconv info input.neo
 ```
 
 ---
@@ -262,8 +262,8 @@ The metadata header is intentionally excluded; only ROM payload integrity is com
 Example output:
 
 ```bash
-$ neoconv verify zintrick.neo --prefix zin
-Verifying: zintrick.neo
+$ neoconv verify input.neo --prefix game
+Verifying: input.neo
 Step 1: Extract -> mame ZIP
 Step 2: Repack ZIP -> .neo
 Step 3: Compare ROM data regions
@@ -302,7 +302,7 @@ C chips always come in pairs. Interleaved bank size is `chip_size * 2`.
 
 ### P-ROM bank swap (`--swap-p`)
 
-Some early SNK titles (KOF94, Neo Turf Masters, and their hacks) store their 2 MB P-ROM with the two 1 MB halves in reversed order relative to what TerraOnion NeoSD / MiSTer expect.
+Some Neo Geo titles and hacks store their 2 MB P-ROM with the two 1 MB halves in reversed order relative to what TerraOnion NeoSD / MiSTer expect.
 
 `neoconv` detects this automatically by inspecting the M68000 exception-vector table (initial Stack Pointer + Reset PC) in both halves. The half carrying valid values — SP in Work RAM (`0x100000–0x10FFFF`), Reset PC in ROM or BIOS (`0x000100–0x1FFFFF` or `0xC00000–0xC7FFFF`) — determines whether a swap is applied.
 
