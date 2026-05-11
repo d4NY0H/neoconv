@@ -390,6 +390,23 @@ class TestSwapPBanks:
 # ---------------------------------------------------------------------------
 
 class TestDiagnosticMode:
+    def test_missing_mandatory_rom_error_has_quick_tips(self, tmp_path):
+        from neoconv.core import parse_mame_dir
+
+        # Intentionally omit p1/s1/m1 to verify actionable error text.
+        (tmp_path / "readme.txt").write_bytes(b"hello")
+
+        with pytest.raises(ValueError) as exc:
+            parse_mame_dir(tmp_path, diagnostic=False)
+
+        msg = str(exc.value)
+        assert "Missing mandatory ROM(s)" in msg
+        assert "Quick tips:" in msg
+        assert "game-p1.bin" in msg
+        assert "game-s1.bin" in msg
+        assert "game-m1.bin" in msg
+        assert "--diagnostic" in msg
+
     def test_unrecognized_files_warn(self, tmp_path):
         import warnings
         from neoconv.core import parse_mame_dir

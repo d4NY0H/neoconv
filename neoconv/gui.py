@@ -9,6 +9,7 @@ from __future__ import annotations
 import tempfile
 import threading
 import tkinter as tk
+import re
 import warnings
 import zipfile
 from pathlib import Path
@@ -187,13 +188,24 @@ class _LogBox(scrolledtext.ScrolledText):
         kw.setdefault("state", "disabled")
         kw.setdefault("font", ("Courier", 9))
         super().__init__(parent, **kw)
+        self._plain = False
+
+    def set_plain(self, enabled: bool) -> None:
+        self._plain = bool(enabled)
+
+    def _plain_text(self, text: str) -> str:
+        if not self._plain:
+            return text
+        # Replace symbols with ASCII markers for terminals/fonts where emoji render poorly.
+        text = text.replace("✅", "[OK]").replace("❌", "[ERROR]").replace("⚠️", "[WARN]")
+        return re.sub(r"\s{2,}", " ", text)
 
     def clear(self):
         self.config(state="normal"); self.delete("1.0", "end"); self.config(state="disabled")
 
     def append(self, text: str):
         self.config(state="normal")
-        self.insert("end", text + "\n")
+        self.insert("end", self._plain_text(text) + "\n")
         self.see("end")
         self.config(state="disabled")
 
@@ -272,6 +284,13 @@ class ExtractTab(ttk.Frame):
         self._run_btn = ttk.Button(self, text="Extract", command=self._run)
         self._run_btn.pack(**pad)
         self._log = _LogBox(self)
+        self._plain_log = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            self,
+            text="Plain log (ASCII only)",
+            variable=self._plain_log,
+            command=lambda: self._log.set_plain(self._plain_log.get()),
+        ).pack(anchor="w", padx=12)
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
         self._toggle_out()
 
@@ -428,6 +447,13 @@ class PackTab(ttk.Frame):
         self._run_btn = ttk.Button(self, text="Pack → .neo", command=self._run)
         self._run_btn.pack(**pad)
         self._log = _LogBox(self)
+        self._plain_log = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            self,
+            text="Plain log (ASCII only)",
+            variable=self._plain_log,
+            command=lambda: self._log.set_plain(self._plain_log.get()),
+        ).pack(anchor="w", padx=12)
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
 
     def _run(self):
@@ -565,6 +591,13 @@ class VerifyTab(ttk.Frame):
         self._run_btn = ttk.Button(self, text="Verify Roundtrip", command=self._run)
         self._run_btn.pack(**pad)
         self._log = _LogBox(self, height=12)
+        self._plain_log = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            self,
+            text="Plain log (ASCII only)",
+            variable=self._plain_log,
+            command=lambda: self._log.set_plain(self._plain_log.get()),
+        ).pack(anchor="w", padx=12)
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
 
     def _run(self):
@@ -639,6 +672,13 @@ class InfoTab(ttk.Frame):
         btn_row.columnconfigure(2, weight=1)
         ttk.Button(btn_row, text="Show Info", command=self._run).grid(row=0, column=1)
         self._log = _LogBox(self, height=14)
+        self._plain_log = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            self,
+            text="Plain log (ASCII only)",
+            variable=self._plain_log,
+            command=lambda: self._log.set_plain(self._plain_log.get()),
+        ).pack(anchor="w", padx=12)
         self._log.pack(fill="both", expand=True, padx=8, pady=4)
 
     def _run(self):

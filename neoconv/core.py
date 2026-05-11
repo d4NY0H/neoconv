@@ -375,9 +375,17 @@ def _roles_to_romset(roles: dict[str, bytes], source: str = "") -> RomSet:
     """
     missing = [r for r in ("P", "S", "M") if r not in roles]
     if missing:
+        tips_by_role = {
+            "P": "P program ROM missing (expected p1/p2, e.g. game-p1.bin or game.p1)",
+            "S": "S ROM missing (expected s1, e.g. game-s1.bin or game.s1)",
+            "M": "M ROM missing (expected m1, e.g. game-m1.bin or game.m1)",
+        }
+        tips = "; ".join(tips_by_role[r] for r in missing)
         raise ValueError(
             f"Missing mandatory ROM(s) in {source or 'input'}: "
-            f"{', '.join(missing)}. Check file naming."
+            f"{', '.join(missing)}. "
+            f"Quick tips: {tips}. "
+            "Use --diagnostic to list unrecognized filenames."
         )
 
     p_rom = roles.get("P", b"") + roles.get("P2", b"")
