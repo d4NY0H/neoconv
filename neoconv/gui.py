@@ -241,27 +241,36 @@ class _FileRow(ttk.Frame):
         label_width: int = 14,
         entry_width: int = 42,
         extra_buttons: list[tuple[str, callable]] | None = None,
+        show_label: bool = True,
         **kw,
     ):
         super().__init__(parent, **kw)
         self._mode = mode
         self._ft   = filetypes or []
 
-        # Grid-based layout for consistent alignment and better resizing
-        self.columnconfigure(1, weight=1)
-
-        self.label = ttk.Label(self, text=label, width=label_width, anchor="w")
-        self.label.grid(row=0, column=0, sticky="w")
         self.var = tk.StringVar()
         self.entry = ttk.Entry(self, textvariable=self.var, width=entry_width)
-        self.entry.grid(row=0, column=1, sticky="ew", padx=4)
         self.button = ttk.Button(self, text="Browse…", command=self._browse)
-        self.button.grid(row=0, column=2, sticky="w")
+
+        if show_label:
+            self.columnconfigure(1, weight=1)
+            self.label: ttk.Label | None = ttk.Label(
+                self, text=label, width=label_width, anchor="w"
+            )
+            self.label.grid(row=0, column=0, sticky="w")
+            ec = 1
+        else:
+            self.columnconfigure(0, weight=1)
+            self.label = None
+            ec = 0
+
+        self.entry.grid(row=0, column=ec, sticky="ew", padx=4)
+        self.button.grid(row=0, column=ec + 1, sticky="w")
 
         self._extra_buttons: list[ttk.Button] = []
         for i, (text, cmd) in enumerate(extra_buttons or []):
             b = ttk.Button(self, text=text, command=cmd)
-            b.grid(row=0, column=3 + i, sticky="w", padx=(6 if i == 0 else 4, 0))
+            b.grid(row=0, column=ec + 2 + i, sticky="w", padx=(6 if i == 0 else 4, 0))
             self._extra_buttons.append(b)
         self._enable_drop()
 
@@ -295,11 +304,25 @@ class _FileRow(ttk.Frame):
             pass
 
 
+# Readable monospaced log font (Courier 9 was too small on HiDPI / dark UI).
+_LOG_BOX_FONT: tuple[str, int] = (
+    ("Menlo", 13)
+    if sys.platform == "darwin"
+    else ("Consolas", 12)
+    if os.name == "nt"
+    else ("DejaVu Sans Mono", 12)
+)
+
+
+# Shared label width (chars) for Pack / Extract section grids.
+_SECTION_LABEL_WIDTH = 18
+
+
 class _LogBox(scrolledtext.ScrolledText):
     def __init__(self, parent, **kw):
         kw.setdefault("height", 8)
         kw.setdefault("state", "disabled")
-        kw.setdefault("font", ("Courier", 9))
+        kw.setdefault("font", _LOG_BOX_FONT)
         super().__init__(parent, **kw)
 
     def clear(self):
@@ -313,10 +336,17 @@ class _LogBox(scrolledtext.ScrolledText):
 
 
 class _SizeCombo(ttk.Frame):
-    def __init__(self, parent, label: str, options: list[tuple[str, int]],
-                 default_label: str, **kw):
+    def __init__(
+        self,
+        parent,
+        label: str,
+        options: list[tuple[str, int]],
+        default_label: str,
+        label_width: int = 14,
+        **kw,
+    ):
         super().__init__(parent, **kw)
-        ttk.Label(self, text=label, width=14, anchor="w").pack(side="left")
+        ttk.Label(self, text=label, width=label_width, anchor="w").pack(side="left")
         self.var = tk.StringVar(value=default_label)
         ttk.Combobox(self, textvariable=self.var,
                      values=[l for l, _ in options],
@@ -339,62 +369,121 @@ class ExtractTab(ttk.Frame):
         self._build()
 
     def _build(self):
-        pad = {"padx": 8, "pady": 3}
+        lw = _SECTION_LABEL_WIDTH
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(3, weight=1)
 
-        self._neo = _FileRow(self, "Input .neo:",
-                             filetypes=[("NEO files", "*.neo"), ("All", "*.*")])
-        self._neo.pack(fill="x", **pad)
+        row = 0
 
-        # Output mode: ZIP or directory
-        out_frame = ttk.LabelFrame(self, text="Output")
-        out_frame.pack(fill="x", padx=8, pady=4)
+        files_frame = ttk.LabelFrame(self, text="Files", padding=(8, 6))
+        files_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
+        # One grid: column 0 is label / radios, column 1 is paths. Tk sizes column 0
+        # to the widest cell in one pass — no idle-time minsize bump on the window.
+        files_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(files_frame, text="Input .neo:", width=lw, anchor="w").grid(
+            row=0, column=0, sticky="w", pady=(0, 2)
+        )
+        self._neo = _FileRow(
+            files_frame,
+            "",
+            filetypes=[("NEO files", "*.neo"), ("All", "*.*")],
+            label_width=lw,
+            show_label=False,
+        )
+        self._neo.grid(row=0, column=1, sticky="wen", pady=(0, 2))
+
         self._out_mode = tk.StringVar(value="zip")
-        ttk.Radiobutton(out_frame, text="ZIP file",  variable=self._out_mode,
-                        value="zip", command=self._toggle_out).grid(
-            row=0, column=0, sticky="w", padx=4, pady=2)
-        ttk.Radiobutton(out_frame, text="Directory", variable=self._out_mode,
-                        value="dir", command=self._toggle_out).grid(
-            row=1, column=0, sticky="w", padx=4)
 
-        self._out_zip = _FileRow(out_frame, "", mode="save",
-                                 filetypes=[("ZIP", "*.zip")], label_width=1)
-        self._out_zip.grid(row=0, column=1, sticky="ew", padx=4)
+        self._rb_zip = ttk.Radiobutton(
+            files_frame,
+            text="Output ZIP file",
+            variable=self._out_mode,
+            value="zip",
+            command=self._toggle_out,
+        )
+        # Same right pad as _FileRow label→entry (4) so column 0 matches a full _FileRow row.
+        self._rb_zip.grid(row=1, column=0, sticky="w", padx=(0, 4), pady=2)
+        self._out_zip = _FileRow(
+            files_frame,
+            "",
+            mode="save",
+            filetypes=[("ZIP", "*.zip")],
+            show_label=False,
+        )
+        self._out_zip.grid(row=1, column=1, sticky="wen", pady=2)
 
-        self._out_dir = _FileRow(out_frame, "", mode="opendir", label_width=1)
-        self._out_dir.grid(row=1, column=1, sticky="ew", padx=4)
+        self._rb_dir = ttk.Radiobutton(
+            files_frame,
+            text="Output Directory",
+            variable=self._out_mode,
+            value="dir",
+            command=self._toggle_out,
+        )
+        self._rb_dir.grid(row=2, column=0, sticky="w", padx=(0, 4), pady=2)
+        self._out_dir = _FileRow(
+            files_frame,
+            "",
+            mode="opendir",
+            filetypes=[],
+            show_label=False,
+        )
+        self._out_dir.grid(row=2, column=1, sticky="wen", pady=2)
         self._out_dir_var = self._out_dir.var
         self._out_dir_entry = self._out_dir.entry
         self._out_dir_button = self._out_dir.button
-        out_frame.columnconfigure(1, weight=1)
+        row += 1
 
-        # Prefix + format
-        row1 = ttk.Frame(self)
-        row1.pack(fill="x", **pad)
-        ttk.Label(row1, text="Prefix:", width=14, anchor="w").pack(side="left")
-        self._prefix = tk.StringVar()
-        ttk.Entry(row1, textvariable=self._prefix, width=14).pack(side="left", padx=4)
-        ttk.Label(row1, text="Format:", width=8).pack(side="left", padx=(12, 0))
+        opt_frame = ttk.LabelFrame(self, text="Options", padding=(8, 6))
+        opt_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
+        opt_frame.columnconfigure(1, weight=1)
+
         self._fmt = tk.StringVar(value="mame")
-        ttk.Radiobutton(row1, text="MAME (.bin)",     variable=self._fmt, value="mame").pack(side="left")
-        ttk.Radiobutton(row1, text="Darksoft (.rom)", variable=self._fmt, value="darksoft").pack(side="left")
+        ttk.Label(opt_frame, text="Format:", width=lw, anchor="w").grid(
+            row=0, column=0, sticky="w", pady=2
+        )
+        fmt_inner = ttk.Frame(opt_frame)
+        fmt_inner.grid(row=0, column=1, sticky="w", padx=4, pady=2)
+        ttk.Radiobutton(
+            fmt_inner, text="MAME (.bin)", variable=self._fmt, value="mame"
+        ).pack(side="left", padx=(0, 8))
+        ttk.Radiobutton(
+            fmt_inner, text="Darksoft (.rom)", variable=self._fmt, value="darksoft"
+        ).pack(side="left")
 
-        # C chip size
-        row2 = ttk.Frame(self)
-        row2.pack(fill="x", **pad)
-        self._c_size = _SizeCombo(row2, "C Chip Size:", _C_CHIP_SIZES, "auto (C_total ÷ 2)")
-        self._c_size.pack(side="left")
+        self._prefix = tk.StringVar()
+        ttk.Label(opt_frame, text="Prefix:", width=lw, anchor="w").grid(
+            row=1, column=0, sticky="w", pady=2
+        )
+        ttk.Entry(opt_frame, textvariable=self._prefix, width=12).grid(
+            row=1, column=1, sticky="w", padx=4, pady=2
+        )
+
+        self._c_size = _SizeCombo(
+            opt_frame,
+            "C Chip Size:",
+            _C_CHIP_SIZES,
+            "auto (C_total ÷ 2)",
+            label_width=lw,
+        )
+        self._c_size.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        row += 1
 
         ctrl_row = ttk.Frame(self)
-        ctrl_row.pack(fill="x", padx=8, pady=3)
+        ctrl_row.grid(row=row, column=0, sticky="ew", padx=8, pady=3)
         self._run_btn = ttk.Button(ctrl_row, text="Extract", command=self._run)
         self._run_btn.grid(row=0, column=0, padx=(0, 8))
-        self._cancel_btn = ttk.Button(ctrl_row, text="Cancel", command=self._request_cancel, state="disabled")
+        self._cancel_btn = ttk.Button(
+            ctrl_row, text="Cancel", command=self._request_cancel, state="disabled"
+        )
         self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
         self._progress = ttk.Progressbar(ctrl_row, mode="indeterminate", length=180)
         self._progress.grid(row=0, column=2, sticky="w")
         ctrl_row.columnconfigure(3, weight=1)
-        self._log = _LogBox(self)
-        self._log.pack(fill="both", expand=True, padx=8, pady=4)
+        row += 1
+
+        self._log = _LogBox(self, height=16)
+        self._log.grid(row=row, column=0, sticky="nsew", padx=8, pady=(4, 8))
         self._toggle_out()
 
     def _toggle_out(self):
@@ -521,12 +610,22 @@ class PackTab(ttk.Frame):
         self._build()
 
     def _build(self):
-        pad = {"padx": 8, "pady": 3}
+        lw = _SECTION_LABEL_WIDTH
+
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(4, weight=1)
+
+        row = 0
+
+        files_frame = ttk.LabelFrame(self, text="Files", padding=(8, 6))
+        files_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
+        files_frame.columnconfigure(0, weight=1)
 
         self._inp = _FileRow(
-            self,
+            files_frame,
             "Input ZIP/Dir:",
             filetypes=[("ZIP files", "*.zip"), ("All", "*.*")],
+            label_width=lw,
             extra_buttons=[
                 (
                     "Pick dir…",
@@ -536,17 +635,22 @@ class PackTab(ttk.Frame):
                 )
             ],
         )
-        self._inp.pack(fill="x", **pad)
+        self._inp.grid(row=0, column=0, sticky="ew", pady=(0, 2))
         self._inp.var.trace_add("write", lambda *_: self._schedule_validation())
 
-        self._out = _FileRow(self, "Output .neo:", mode="save",
-                             filetypes=[("NEO files", "*.neo"), ("All", "*.*")])
-        self._out.pack(fill="x", **pad)
+        self._out = _FileRow(
+            files_frame,
+            "Output .neo:",
+            mode="save",
+            filetypes=[("NEO files", "*.neo"), ("All", "*.*")],
+            label_width=lw,
+        )
+        self._out.grid(row=1, column=0, sticky="ew", pady=(2, 0))
         self._out.var.trace_add("write", lambda *_: self._schedule_validation())
+        row += 1
 
-        # Metadata
-        meta_frame = ttk.LabelFrame(self, text="Metadata")
-        meta_frame.pack(fill="x", padx=8, pady=4)
+        meta_frame = ttk.LabelFrame(self, text="Metadata", padding=(8, 6))
+        meta_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
         meta_frame.columnconfigure(1, weight=1)
         fields = [
             ("Name:",         "name",       "Unknown"),
@@ -557,8 +661,8 @@ class PackTab(ttk.Frame):
         ]
         self._vars: dict[str, tk.StringVar] = {}
         for i, (lbl, key, default) in enumerate(fields):
-            ttk.Label(meta_frame, text=lbl, width=14, anchor="w").grid(
-                row=i, column=0, sticky="w", padx=4, pady=2)
+            ttk.Label(meta_frame, text=lbl, width=lw, anchor="w").grid(
+                row=i, column=0, sticky="w", pady=2)
             v = tk.StringVar(value=default)
             self._vars[key] = v
             v.trace_add("write", lambda *_: self._schedule_validation())
@@ -566,62 +670,104 @@ class PackTab(ttk.Frame):
                 _enforce_latin1_byte_limit(v, 32)
             elif key == "mfr":
                 _enforce_latin1_byte_limit(v, 16)
-            ttk.Entry(meta_frame, textvariable=v).grid(
-                row=i, column=1, sticky="ew", padx=4)
+            ent_w = 11 if key in ("year", "ngh", "screenshot") else None
+            ent = ttk.Entry(
+                meta_frame,
+                textvariable=v,
+                width=(ent_w if ent_w else 24),
+            )
+            sticky = "w" if ent_w else "ew"
+            ent.grid(row=i, column=1, sticky=sticky, padx=4, pady=2)
         gr = len(fields)
-        ttk.Label(meta_frame, text="Genre:", width=14, anchor="w").grid(
-            row=gr, column=0, sticky="w", padx=4, pady=2)
+        ttk.Label(meta_frame, text="Genre:", width=lw, anchor="w").grid(
+            row=gr, column=0, sticky="w", pady=2)
         self._genre = tk.StringVar(value="Other")
         self._genre.trace_add("write", lambda *_: self._schedule_validation())
-        ttk.Combobox(meta_frame, textvariable=self._genre,
-                     values=list(GENRES.values()), state="readonly", width=16
-                     ).grid(row=gr, column=1, sticky="w", padx=4)
+        ttk.Combobox(
+            meta_frame,
+            textvariable=self._genre,
+            values=list(GENRES.values()),
+            state="readonly",
+            width=max(18, lw),
+        ).grid(row=gr, column=1, sticky="w", padx=4, pady=2)
+        row += 1
 
-        # Options
-        opt_frame = ttk.LabelFrame(self, text="Options")
-        opt_frame.pack(fill="x", padx=8, pady=4)
+        opt_frame = ttk.LabelFrame(self, text="Options", padding=(8, 6))
+        opt_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
         opt_frame.columnconfigure(1, weight=1)
 
-        # P-ROM swap: keep label aligned; radios wrapped into two lines
-        ttk.Label(opt_frame, text="P-ROM Bank Swap:", width=18, anchor="w").grid(
-            row=0, column=0, sticky="w", padx=4, pady=2
+        ttk.Label(opt_frame, text="P-ROM Bank Swap:", width=lw, anchor="w").grid(
+            row=0, column=0, rowspan=3, sticky="nw", pady=2
         )
         self._swap_p = tk.StringVar(value="auto")
         self._swap_p.trace_add("write", lambda *_: self._schedule_validation())
-        radios = ttk.Frame(opt_frame)
-        radios.grid(row=0, column=1, sticky="w", padx=4, pady=2)
         ttk.Radiobutton(
-            radios, text="No  (never swap)", variable=self._swap_p, value="no"
-        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+            opt_frame,
+            text="Auto-detect  (default)",
+            variable=self._swap_p,
+            value="auto",
+        ).grid(row=0, column=1, sticky="w", padx=4, pady=1)
         ttk.Radiobutton(
-            radios, text="Auto-detect  (default)", variable=self._swap_p, value="auto"
-        ).grid(row=0, column=1, sticky="w")
+            opt_frame,
+            text="No  (never swap)",
+            variable=self._swap_p,
+            value="no",
+        ).grid(row=1, column=1, sticky="w", padx=4, pady=1)
         ttk.Radiobutton(
-            radios, text="Yes  (always swap)", variable=self._swap_p, value="yes"
-        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+            opt_frame,
+            text="Yes  (always swap)",
+            variable=self._swap_p,
+            value="yes",
+        ).grid(row=2, column=1, sticky="w", padx=4, pady=1)
 
         self._diagnostic = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             opt_frame,
             text="Diagnostic mode  (log warnings for unrecognized files)",
             variable=self._diagnostic,
-        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=4, pady=2)
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=4, pady=(6, 2))
+        row += 1
 
         ctrl_row = ttk.Frame(self)
-        ctrl_row.pack(fill="x", padx=8, pady=3)
+        ctrl_row.grid(row=row, column=0, sticky="ew", padx=8, pady=3)
         self._run_btn = ttk.Button(ctrl_row, text="Pack → .neo", command=self._run)
         self._run_btn.grid(row=0, column=0, padx=(0, 8))
-        self._cancel_btn = ttk.Button(ctrl_row, text="Cancel", command=self._request_cancel, state="disabled")
+        self._cancel_btn = ttk.Button(
+            ctrl_row, text="Cancel", command=self._request_cancel, state="disabled"
+        )
         self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
-        self._progress = ttk.Progressbar(ctrl_row, mode="determinate", length=220, maximum=4, value=0)
+        self._progress = ttk.Progressbar(
+            ctrl_row, mode="determinate", length=220, maximum=4, value=0
+        )
         self._progress.grid(row=0, column=2, sticky="w")
-        self._status_var = tk.StringVar(value="Status: waiting for input")
-        self._status_label = tk.Label(ctrl_row, textvariable=self._status_var, anchor="w")
-        self._status_label.grid(row=0, column=3, sticky="w", padx=(10, 0))
+        self._status_wrap = tk.Frame(ctrl_row, highlightthickness=0, bd=0)
+        self._status_wrap.grid(row=0, column=3, sticky="nsew", padx=(10, 0))
         ctrl_row.columnconfigure(3, weight=1)
-        self._log = _LogBox(self)
-        self._log.pack(fill="both", expand=True, padx=8, pady=4)
+        self._status_var = tk.StringVar(value="Status: waiting for input")
+        # wraplength tracks allocated width so longer status text wraps instead of
+        # widening the toplevel (fixed ``width=…`` in chars made the default window wider).
+        self._status_label = tk.Label(
+            self._status_wrap,
+            textvariable=self._status_var,
+            anchor="nw",
+            justify="left",
+            wraplength=280,
+        )
+        self._status_label.pack(fill="x", anchor="nw")
+        self._status_wrap.bind("<Configure>", self._sync_pack_status_wraplength)
+        row += 1
+
+        self._log = _LogBox(self, height=16)
+        self._log.grid(row=row, column=0, sticky="nsew", padx=8, pady=(4, 8))
         self._schedule_validation()
+
+    def _sync_pack_status_wraplength(self, event: tk.Event) -> None:
+        if event.widget is not self._status_wrap:
+            return
+        tw = int(event.width)
+        if tw < 8:
+            return
+        self._status_label.configure(wraplength=max(1, tw - 8))
 
     def _run(self):
         if self._is_running:
@@ -892,50 +1038,76 @@ class VerifyTab(ttk.Frame):
         self._build()
 
     def _build(self):
-        pad = {"padx": 8, "pady": 4}
+        lw = _SECTION_LABEL_WIDTH
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(3, weight=1)
 
-        self._neo = _FileRow(self, "Input .neo:",
-                             filetypes=[("NEO files", "*.neo"), ("All", "*.*")])
-        self._neo.pack(fill="x", **pad)
+        row = 0
 
-        row = ttk.Frame(self)
-        row.pack(fill="x", **pad)
-        row.columnconfigure(1, weight=1)
-        ttk.Label(row, text="Prefix:", width=14, anchor="w").grid(
-            row=0, column=0, sticky="w"
+        files_frame = ttk.LabelFrame(self, text="File", padding=(8, 6))
+        files_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
+        files_frame.columnconfigure(0, weight=1)
+        self._neo = _FileRow(
+            files_frame,
+            "Input .neo:",
+            filetypes=[("NEO files", "*.neo"), ("All", "*.*")],
+            label_width=lw,
         )
-        self._prefix = tk.StringVar()
-        ttk.Entry(row, textvariable=self._prefix, width=14).grid(
-            row=0, column=1, sticky="w", padx=4
-        )
-        ttk.Label(row, text="Format:", width=8).grid(
-            row=0, column=2, sticky="w", padx=(12, 0)
-        )
+        self._neo.grid(row=0, column=0, sticky="ew")
+        row += 1
+
+        opt_frame = ttk.LabelFrame(self, text="Options", padding=(8, 6))
+        opt_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
+        opt_frame.columnconfigure(1, weight=1)
+
         self._fmt = tk.StringVar(value="mame")
-        ttk.Radiobutton(row, text="MAME", variable=self._fmt, value="mame").grid(
-            row=0, column=3, sticky="w"
+        ttk.Label(opt_frame, text="Format:", width=lw, anchor="w").grid(
+            row=0, column=0, sticky="w", pady=2
         )
-        ttk.Radiobutton(row, text="Darksoft", variable=self._fmt, value="darksoft").grid(
-            row=0, column=4, sticky="w"
+        fmt_inner = ttk.Frame(opt_frame)
+        fmt_inner.grid(row=0, column=1, sticky="w", padx=4, pady=2)
+        ttk.Radiobutton(
+            fmt_inner, text="MAME (.bin)", variable=self._fmt, value="mame"
+        ).pack(side="left", padx=(0, 8))
+        ttk.Radiobutton(
+            fmt_inner, text="Darksoft (.rom)", variable=self._fmt, value="darksoft"
+        ).pack(side="left")
+
+        self._prefix = tk.StringVar()
+        ttk.Label(opt_frame, text="Prefix:", width=lw, anchor="w").grid(
+            row=1, column=0, sticky="w", pady=2
+        )
+        ttk.Entry(opt_frame, textvariable=self._prefix, width=12).grid(
+            row=1, column=1, sticky="w", padx=4, pady=2
         )
 
-        row2 = ttk.Frame(self)
-        row2.pack(fill="x", **pad)
-        row2.columnconfigure(1, weight=1)
-        self._c_size = _SizeCombo(row2, "C Chip Size:", _C_CHIP_SIZES, "auto (C_total ÷ 2)")
-        self._c_size.grid(row=0, column=0, sticky="w")
+        self._c_size = _SizeCombo(
+            opt_frame,
+            "C Chip Size:",
+            _C_CHIP_SIZES,
+            "auto (C_total ÷ 2)",
+            label_width=lw,
+        )
+        self._c_size.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        row += 1
 
         ctrl_row = ttk.Frame(self)
-        ctrl_row.pack(fill="x", padx=8, pady=3)
+        ctrl_row.grid(row=row, column=0, sticky="ew", padx=8, pady=3)
         self._run_btn = ttk.Button(ctrl_row, text="Verify Roundtrip", command=self._run)
         self._run_btn.grid(row=0, column=0, padx=(0, 8))
-        self._cancel_btn = ttk.Button(ctrl_row, text="Cancel", command=self._request_cancel, state="disabled")
+        self._cancel_btn = ttk.Button(
+            ctrl_row, text="Cancel", command=self._request_cancel, state="disabled"
+        )
         self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
-        self._progress = ttk.Progressbar(ctrl_row, mode="determinate", length=220, maximum=4, value=0)
+        self._progress = ttk.Progressbar(
+            ctrl_row, mode="determinate", length=220, maximum=4, value=0
+        )
         self._progress.grid(row=0, column=2, sticky="w")
         ctrl_row.columnconfigure(3, weight=1)
-        self._log = _LogBox(self, height=12)
-        self._log.pack(fill="both", expand=True, padx=8, pady=4)
+        row += 1
+
+        self._log = _LogBox(self, height=16)
+        self._log.grid(row=row, column=0, sticky="nsew", padx=8, pady=(4, 8))
 
     def _run(self):
         if self._is_running:
@@ -1041,17 +1213,33 @@ class InfoTab(ttk.Frame):
         self._build()
 
     def _build(self):
-        pad = {"padx": 8, "pady": 4}
-        self._neo = _FileRow(self, "Input .neo:",
-                             filetypes=[("NEO files", "*.neo"), ("All", "*.*")])
-        self._neo.pack(fill="x", **pad)
-        btn_row = ttk.Frame(self)
-        btn_row.pack(fill="x", **pad)
-        btn_row.columnconfigure(0, weight=1)
-        btn_row.columnconfigure(2, weight=1)
-        ttk.Button(btn_row, text="Show Info", command=self._run).grid(row=0, column=1)
-        self._log = _LogBox(self, height=14)
-        self._log.pack(fill="both", expand=True, padx=8, pady=4)
+        lw = _SECTION_LABEL_WIDTH
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(2, weight=1)
+
+        row = 0
+        file_frame = ttk.LabelFrame(self, text="File", padding=(8, 6))
+        file_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
+        file_frame.columnconfigure(0, weight=1)
+        self._neo = _FileRow(
+            file_frame,
+            "Input .neo:",
+            filetypes=[("NEO files", "*.neo"), ("All", "*.*")],
+            label_width=lw,
+        )
+        self._neo.grid(row=0, column=0, sticky="ew")
+        row += 1
+
+        ctrl_row = ttk.Frame(self)
+        ctrl_row.grid(row=row, column=0, sticky="ew", padx=8, pady=3)
+        ttk.Button(ctrl_row, text="Show Info", command=self._run).grid(
+            row=0, column=0, sticky="w", padx=(0, 8)
+        )
+        ctrl_row.columnconfigure(1, weight=1)
+        row += 1
+
+        self._log = _LogBox(self, height=16)
+        self._log.grid(row=row, column=0, sticky="nsew", padx=8, pady=(4, 8))
 
     def _run(self):
         neo_path = Path(self._neo.value)
