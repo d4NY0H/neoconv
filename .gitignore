@@ -6,3 +6,8 @@ build/
 .venv/
 *.neo
 *.zip
+
+# pytest / coverage.py
+.coverage
+.coverage.*
+htmlcov/
