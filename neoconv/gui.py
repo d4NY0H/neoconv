@@ -23,11 +23,13 @@ from .core import (
     GENRE_BY_NAME,
     GENRES,
     NeoMeta,
+    collect_pack_psm_roles_for_validation,
     detect_swap_p_needed,
     extract_romset,
     extract_romset_to_zip,
     mame_dir_to_neo,
     mame_zip_to_neo,
+    pack_psm_role_from_basename,
     parse_neo,
     verify_roundtrip,
 )
@@ -142,36 +144,18 @@ def _save_settings(data: dict) -> None:
 
 
 def _name_to_required_role(filename: str) -> str | None:
-    fn = Path(filename).name.lower()
-    ext = Path(fn).suffix.lstrip(".")
-    stem = Path(fn).stem
-    ext_map = {"p1": "P", "p2": "P", "s1": "S", "m1": "M"}
-    if ext in ext_map:
-        return ext_map[ext]
-    for key, role in ext_map.items():
-        if fn.endswith(f"-{key}.bin") or fn.endswith(f"_{key}.bin") \
-                or stem.endswith(f"-{key}") or stem.endswith(f"_{key}"):
-            return role
-    return None
+    return pack_psm_role_from_basename(filename)
 
 
 def _scan_required_roles(src: Path) -> set[str]:
-    roles: set[str] = set()
     if src.is_dir():
-        for f in src.iterdir():
-            if f.is_file():
-                role = _name_to_required_role(f.name)
-                if role:
-                    roles.add(role)
+        names = [str(p) for p in src.iterdir() if p.is_file()]
     elif zipfile.is_zipfile(src):
         with zipfile.ZipFile(src, "r") as zf:
-            for info in zf.infolist():
-                if info.is_dir():
-                    continue
-                role = _name_to_required_role(info.filename)
-                if role:
-                    roles.add(role)
-    return roles
+            names = [e.filename for e in zf.infolist() if not e.is_dir()]
+    else:
+        return set()
+    return collect_pack_psm_roles_for_validation(names)
 
 
 # ---------------------------------------------------------------------------

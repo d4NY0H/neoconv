@@ -109,6 +109,10 @@ class TestNameToRole:
         assert _name_to_role("ZIN-P1.BIN") == "P"
         assert _name_to_role("ZIN-C1.C1") == "C1"
 
+    def test_encrypted_sprite_naming_c1r(self):
+        assert _name_to_role("269-c1r.c1") == "C1"
+        assert _name_to_role("269-c2r.c2") == "C2"
+
 
 # ---------------------------------------------------------------------------
 # C ROM interleaving / de-interleaving
@@ -279,6 +283,61 @@ class TestCoreEdgeCases:
             zf.writestr("readme.txt", b"x")
         with pytest.warns(UserWarning, match=r"\[diagnostic\]"):
             parse_mame_zip(z, diagnostic=True)
+
+    def test_parse_mame_zip_svc_parent_style_inserts_512k_zero_s(self, tmp_path):
+        """MAME parent ``svc`` has no s1; fixed layer is 512 KiB of zeros (PVC / c1r)."""
+        z = tmp_path / "svcish.zip"
+        chip = make_rom(C_BANK_SIZE, 0x11)
+        with zipfile.ZipFile(z, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("269-p1.p1", make_rom(1024, 1))
+            zf.writestr("269-p2.p2", make_rom(1024, 2))
+            zf.writestr("269-m1.m1", make_rom(1024, 3))
+            zf.writestr("269-v1.v1", make_rom(1024, 4))
+            zf.writestr("269-c1r.c1", chip)
+            zf.writestr("269-c2r.c2", make_rom(C_BANK_SIZE, 0x22))
+        with pytest.warns(UserWarning, match="No text-layer ROM"):
+            rs = parse_mame_zip(z)
+        assert len(rs.s) == 0x80000
+        assert rs.s == b"\x00" * 0x80000
+
+    def test_parse_mame_zip_encrypted_without_c1r_inserts_128k_zero_s(self, tmp_path):
+        z = tmp_path / "sam5ish.zip"
+        chip = make_rom(C_BANK_SIZE, 0x11)
+        with zipfile.ZipFile(z, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("270-p1.p1", make_rom(1024, 1))
+            zf.writestr("270-p2.sp2", make_rom(1024, 2))
+            zf.writestr("270-m1.m1", make_rom(1024, 3))
+            zf.writestr("270-v1.v1", make_rom(1024, 4))
+            zf.writestr("270-c1.c1", chip)
+            zf.writestr("270-c2.c2", make_rom(C_BANK_SIZE, 0x22))
+        with pytest.warns(UserWarning, match="No text-layer ROM"):
+            rs = parse_mame_zip(z)
+        assert len(rs.s) == 0x20000
+        assert rs.s == b"\x00" * 0x20000
+
+    def test_roles_to_romset_without_filenames_still_requires_physical_s(self):
+        with pytest.raises(ValueError, match="S"):
+            _roles_to_romset(
+                {
+                    "P": b"x" * 4096,
+                    "M": b"y" * 1024,
+                    "C1": make_rom(C_BANK_SIZE),
+                    "C2": make_rom(C_BANK_SIZE),
+                },
+                source="dict",
+            )
+
+    def test_parse_mame_dir_inserts_synthetic_s_like_zip(self, tmp_path):
+        chip = make_rom(C_BANK_SIZE, 0x11)
+        (tmp_path / "269-p1.p1").write_bytes(make_rom(1024, 1))
+        (tmp_path / "269-p2.p2").write_bytes(make_rom(1024, 2))
+        (tmp_path / "269-m1.m1").write_bytes(make_rom(1024, 3))
+        (tmp_path / "269-v1.v1").write_bytes(make_rom(1024, 4))
+        (tmp_path / "269-c1r.c1").write_bytes(chip)
+        (tmp_path / "269-c2r.c2").write_bytes(make_rom(C_BANK_SIZE, 0x22))
+        with pytest.warns(UserWarning, match="No text-layer ROM"):
+            rs = parse_mame_dir(tmp_path)
+        assert len(rs.s) == 0x80000
 
     def test_parse_mame_dir_diagnostic_warns_on_unknown_files(self, tmp_path):
         (tmp_path / "game-p1.bin").write_bytes(b"p" * 4096)

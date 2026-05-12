@@ -52,7 +52,7 @@ import warnings
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -339,6 +339,82 @@ def parse_neo(data: bytes) -> RomSet:
 # MAME ZIP parsing
 # ---------------------------------------------------------------------------
 
+def pack_psm_role_from_basename(filename: str) -> Optional[str]:
+    """
+    Map a basename to P / S / M for Pack-tab preflight (same rules as the GUI).
+
+    ``p1`` and ``p2`` both count as program ROM (``P``); only these three roles
+    are considered here (V/C are handled elsewhere).
+    """
+    fn = Path(filename).name.lower()
+    ext = Path(fn).suffix.lstrip(".")
+    stem = Path(fn).stem
+    ext_map = {"p1": "P", "p2": "P", "s1": "S", "m1": "M"}
+    if ext in ext_map:
+        return ext_map[ext]
+    for key, role in ext_map.items():
+        if fn.endswith(f"-{key}.bin") or fn.endswith(f"_{key}.bin") \
+                or stem.endswith(f"-{key}") or stem.endswith(f"_{key}"):
+            return role
+    return None
+
+
+def collect_pack_psm_roles_for_validation(filenames: Iterable[str]) -> set[str]:
+    """
+    P/S/M roles satisfied for Pack validation, including boards with no s1 file.
+
+    MAME lists several sets (e.g. parent ``svc``) where the text layer has no
+    dedicated s1 ROM; the driver fills the fixed region with zeros. When such
+    a set is detected, ``S`` is treated as present for preflight only.
+    """
+    names = tuple(filenames)
+    roles: set[str] = set()
+    for n in names:
+        r = pack_psm_role_from_basename(n)
+        if r:
+            roles.add(r)
+    if "S" not in roles and _should_inject_synthetic_s_rom(names, roles):
+        roles.add("S")
+    return roles
+
+
+def _should_inject_synthetic_s_rom(names: tuple[str, ...], psm_roles: set[str]) -> bool:
+    if "P" not in psm_roles or "M" not in psm_roles:
+        return False
+    if not any(_name_to_role(Path(p).name) == "C1" for p in names):
+        return False
+    return True
+
+
+def _synthetic_zero_s_size_from_filenames(filenames: tuple[str, ...]) -> int:
+    """MAME ``fixed`` fill size: 512 KiB (PVC / *-c1r.*) vs 128 KiB (typical SMA/CMC)."""
+    blob = " ".join(Path(p).name.lower() for p in filenames)
+    if "c1r" in blob or "c2r" in blob:
+        return 0x80000
+    return 0x20000
+
+
+def _inject_synthetic_s_rom_if_needed(
+    roles: dict[str, bytes],
+    source: str,
+    source_filenames: tuple[str, ...] | None,
+) -> None:
+    if "S" in roles or source_filenames is None:
+        return
+    names = source_filenames
+    psm = {r for n in names if (r := pack_psm_role_from_basename(n))}
+    if not _should_inject_synthetic_s_rom(names, psm):
+        return
+    size = _synthetic_zero_s_size_from_filenames(names)
+    roles["S"] = b"\x00" * size
+    warnings.warn(
+        f"No text-layer ROM (s1) in {source}; using {size // 1024} KiB zero fill "
+        "as MAME does for boards without a dedicated s1.",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
 def _name_to_role(filename: str) -> Optional[str]:
     """
     Map a filename inside a MAME zip to its ROM role.
@@ -368,11 +444,22 @@ def _name_to_role(filename: str) -> Optional[str]:
     return None
 
 
-def _roles_to_romset(roles: dict[str, bytes], source: str = "") -> RomSet:
+def _roles_to_romset(
+    roles: dict[str, bytes],
+    source: str = "",
+    *,
+    source_filenames: tuple[str, ...] | None = None,
+) -> RomSet:
     """
     Build a RomSet from a dict mapping role strings to raw bytes.
     Raises ValueError for missing mandatory ROMs or malformed C chip counts.
+
+    When ``source_filenames`` is provided (ZIP member paths or directory
+    basenames), boards without a physical s1 ROM may receive a zero-filled
+    synthetic S region matching MAME's ``fixed`` area behaviour.
     """
+    roles = dict(roles)
+    _inject_synthetic_s_rom_if_needed(roles, source, source_filenames)
     missing = [r for r in ("P", "S", "M") if r not in roles]
     if missing:
         tips_by_role = {
@@ -456,11 +543,13 @@ def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
     """
     roles: dict[str, bytes] = {}
     ignored: list[str] = []
+    all_names: list[str] = []
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
             for entry in zf.infolist():
                 if entry.is_dir():
                     continue
+                all_names.append(entry.filename)
                 role = _name_to_role(entry.filename)
                 if role is not None:
                     _store_role_data(roles, role, zf.read(entry.filename), entry.filename, diagnostic)
@@ -477,7 +566,7 @@ def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
                 stacklevel=2,
             )
 
-    return _roles_to_romset(roles, source=str(zip_path))
+    return _roles_to_romset(roles, source=str(zip_path), source_filenames=tuple(all_names))
 
 
 def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
@@ -491,8 +580,10 @@ def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
     """
     roles: dict[str, bytes] = {}
     ignored: list[str] = []
+    all_names: list[str] = []
     for f in dir_path.iterdir():
         if f.is_file():
+            all_names.append(f.name)
             role = _name_to_role(f.name)
             if role is not None:
                 _store_role_data(roles, role, f.read_bytes(), f.name, diagnostic)
@@ -507,7 +598,7 @@ def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
                 stacklevel=2,
             )
 
-    return _roles_to_romset(roles, source=str(dir_path))
+    return _roles_to_romset(roles, source=str(dir_path), source_filenames=tuple(all_names))
 
 
 # ---------------------------------------------------------------------------
