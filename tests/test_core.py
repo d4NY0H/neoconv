@@ -20,6 +20,7 @@ from neoconv.core import (
     NeoMeta,
     RomSet,
     P_SWAP_SIZE,
+    _check_m68k_vectors,
     _interleave_c_chips,
     _name_to_role,
     _roles_to_romset,
@@ -27,6 +28,10 @@ from neoconv.core import (
     extract_neo_to_zip,
     extract_romset,
     extract_romset_to_zip,
+    neo_to_darksoft_zip,
+    neo_to_mame_zip,
+    parse_mame_dir,
+    parse_mame_zip,
     parse_neo,
     swap_p_banks,
     verify_roundtrip,
@@ -223,6 +228,76 @@ class TestBuildParseNeo:
         neo = make_neo(rs)
         with pytest.raises(ValueError):
             parse_neo(neo[:-100])  # truncate last 100 bytes
+
+    def test_file_shorter_than_header_raises(self):
+        data = NEO_MAGIC + b"\x00" * 64
+        assert len(data) < NEO_HEADER_SIZE
+        with pytest.raises(ValueError, match="too small"):
+            parse_neo(data)
+
+    def test_parse_neo_appends_optional_v2_region(self):
+        """Header may split V data across v1_size and v2_size (uncommon but supported)."""
+        h = bytearray(NEO_HEADER_SIZE)
+        h[0:4] = NEO_MAGIC
+        struct.pack_into("<I", h, 0x04, 0)
+        struct.pack_into("<I", h, 0x08, 0)
+        struct.pack_into("<I", h, 0x0C, 0)
+        struct.pack_into("<I", h, 0x10, 3)
+        struct.pack_into("<I", h, 0x14, 2)
+        struct.pack_into("<I", h, 0x18, 0)
+        struct.pack_into("<H", h, 0x1C, 1999)
+        struct.pack_into("<H", h, 0x1E, 0)
+        struct.pack_into("<I", h, 0x20, 0)
+        struct.pack_into("<I", h, 0x24, 0)
+        neo = bytes(h) + b"AAA" + b"bb"
+        rs = parse_neo(neo)
+        assert rs.v == b"AAAbb"
+
+
+# ---------------------------------------------------------------------------
+# Vector check, ZIP/dir parse helpers, neo_to_* convenience
+# ---------------------------------------------------------------------------
+
+class TestCoreEdgeCases:
+    def test_check_m68k_vectors_too_short(self):
+        ok, sp, rst = _check_m68k_vectors(b"\x00\x01\x02")
+        assert ok is False
+        assert sp == 0 and rst == 0
+
+    def test_parse_mame_zip_rejects_corrupt_archive(self, tmp_path):
+        bad = tmp_path / "bad.zip"
+        bad.write_bytes(b"\xffNOT_A_ZIP\xff")
+        with pytest.raises(ValueError, match="Cannot open ZIP"):
+            parse_mame_zip(bad)
+
+    def test_parse_mame_zip_diagnostic_warns_on_unknown_files(self, tmp_path):
+        z = tmp_path / "set.zip"
+        with zipfile.ZipFile(z, "w") as zf:
+            zf.writestr("game-p1.bin", b"p" * 4096)
+            zf.writestr("game-s1.bin", make_rom(128 * 1024, 0x11))
+            zf.writestr("game-m1.bin", make_rom(128 * 1024, 0x22))
+            zf.writestr("readme.txt", b"x")
+        with pytest.warns(UserWarning, match=r"\[diagnostic\]"):
+            parse_mame_zip(z, diagnostic=True)
+
+    def test_parse_mame_dir_diagnostic_warns_on_unknown_files(self, tmp_path):
+        (tmp_path / "game-p1.bin").write_bytes(b"p" * 4096)
+        (tmp_path / "game-s1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-m1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "readme.txt").write_text("x", encoding="utf-8")
+        with pytest.warns(UserWarning, match=r"\[diagnostic\]"):
+            parse_mame_dir(tmp_path, diagnostic=True)
+
+    def test_neo_to_mame_zip_and_darksoft_zip(self, tmp_path):
+        rs = make_romset(p_size=65536)
+        neo_path = tmp_path / "tiny.neo"
+        neo_path.write_bytes(make_neo(rs))
+        mzip = neo_to_mame_zip(neo_path, "game")
+        dzip = neo_to_darksoft_zip(neo_path, "game")
+        assert mzip[:2] == b"PK"
+        assert dzip[:2] == b"PK"
+        with zipfile.ZipFile(io.BytesIO(mzip)) as zf:
+            assert any(n.endswith("-p1.bin") for n in zf.namelist())
 
 
 # ---------------------------------------------------------------------------

@@ -375,3 +375,4 @@ def test_neoconv_main_module_invokes_cli_main(monkeypatch):
 
     runpy.run_module("neoconv.__main__", run_name="__main__")
     assert called == [1]
+
