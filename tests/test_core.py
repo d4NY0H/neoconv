@@ -300,6 +300,48 @@ class TestCoreEdgeCases:
         assert len(rs.s) == 0x80000
         assert rs.s == b"\x00" * 0x80000
 
+    def test_parse_mame_zip_garou_style_512k_zero_s_without_c1r(self, tmp_path):
+        """Garou parent uses 512 KiB fixed fill; C ROMs are ``253-c1.c1`` (no ``r``)."""
+        z = tmp_path / "garouish.zip"
+        chip = make_rom(C_BANK_SIZE, 0x11)
+        with zipfile.ZipFile(z, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("253-p1.p1", make_rom(1024, 1))
+            zf.writestr("253-p2.sp2", make_rom(1024, 2))
+            zf.writestr("253-m1.m1", make_rom(1024, 3))
+            zf.writestr("253-v1.v1", make_rom(1024, 4))
+            zf.writestr("253-c1.c1", chip)
+            zf.writestr("253-c2.c2", make_rom(C_BANK_SIZE, 0x22))
+        with pytest.warns(UserWarning, match="No text-layer ROM"):
+            rs = parse_mame_zip(z)
+        assert len(rs.s) == 0x80000
+
+    def test_parse_mame_zip_kof2003_style_c1c_suffix_512k_s(self, tmp_path):
+        z = tmp_path / "k03.zip"
+        chip = make_rom(C_BANK_SIZE, 0x11)
+        with zipfile.ZipFile(z, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("271-p1.p1", make_rom(1024, 1))
+            zf.writestr("271-p2.p2", make_rom(1024, 2))
+            zf.writestr("271-m1.m1", make_rom(1024, 3))
+            zf.writestr("271-v1.v1", make_rom(1024, 4))
+            zf.writestr("271-c1c.c1", chip)
+            zf.writestr("271-c2c.c2", make_rom(C_BANK_SIZE, 0x22))
+        with pytest.warns(UserWarning, match="No text-layer ROM"):
+            rs = parse_mame_zip(z)
+        assert len(rs.s) == 0x80000
+
+    def test_parse_mame_zip_kof10th_style_256k_zero_s(self, tmp_path):
+        z = tmp_path / "kf10.zip"
+        chip = make_rom(C_BANK_SIZE // 2, 0x11)
+        with zipfile.ZipFile(z, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("kf10-p1.bin", make_rom(1024, 1))
+            zf.writestr("kf10-m1.bin", make_rom(1024, 3))
+            zf.writestr("kf10-v1.bin", make_rom(1024, 4))
+            zf.writestr("kf10-c1a.bin", chip)
+            zf.writestr("kf10-c2a.bin", make_rom(C_BANK_SIZE // 2, 0x22))
+        with pytest.warns(UserWarning, match="No text-layer ROM"):
+            rs = parse_mame_zip(z)
+        assert len(rs.s) == 0x40000
+
     def test_parse_mame_zip_encrypted_without_c1r_inserts_128k_zero_s(self, tmp_path):
         z = tmp_path / "sam5ish.zip"
         chip = make_rom(C_BANK_SIZE, 0x11)

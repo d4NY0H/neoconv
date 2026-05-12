@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re
 import struct
 import warnings
 import zipfile
@@ -66,6 +67,10 @@ P_SWAP_SIZE = 2 * 1024 * 1024  # 2 MB: size that triggers optional P-ROM bank sw
 
 # Backwards-compatible alias
 C_BANK_SIZE = C_CHIP_SIZE_DEFAULT
+
+# MAME ``neogeo.xml`` cart ROM IDs whose parent sets use a 512 KiB zero-filled
+# ``fixed`` / text layer when there is no dedicated s1 (encrypted boards).
+_SYNTH_S_MAME_512K_SET_IDS = frozenset({253, 256, 257, 263, 266, 269, 271})
 
 
 def swap_p_banks(p_rom: bytes) -> bytes:
@@ -359,6 +364,23 @@ def pack_psm_role_from_basename(filename: str) -> Optional[str]:
     return None
 
 
+def _filenames_imply_c1_sprite_rom(filenames: tuple[str, ...]) -> bool:
+    """
+    True if the input looks like it includes a Neo Geo C1 sprite ROM.
+
+    MAME uses several naming schemes (``253-c1.c1``, ``mart-c1.bin``,
+    ``kf10-c1a.bin``); :func:`_name_to_role` only covers the common forms.
+    """
+    for p in filenames:
+        n = Path(p).name
+        if _name_to_role(n) == "C1":
+            return True
+        nl = n.lower()
+        if re.search(r"[-_]c1[a-z0-9]*\.(?:c1|bin)\b", nl):
+            return True
+    return False
+
+
 def collect_pack_psm_roles_for_validation(filenames: Iterable[str]) -> set[str]:
     """
     P/S/M roles satisfied for Pack validation, including boards with no s1 file.
@@ -381,16 +403,30 @@ def collect_pack_psm_roles_for_validation(filenames: Iterable[str]) -> set[str]:
 def _should_inject_synthetic_s_rom(names: tuple[str, ...], psm_roles: set[str]) -> bool:
     if "P" not in psm_roles or "M" not in psm_roles:
         return False
-    if not any(_name_to_role(Path(p).name) == "C1" for p in names):
-        return False
-    return True
+    return _filenames_imply_c1_sprite_rom(names)
 
 
 def _synthetic_zero_s_size_from_filenames(filenames: tuple[str, ...]) -> int:
-    """MAME ``fixed`` fill size: 512 KiB (PVC / *-c1r.*) vs 128 KiB (typical SMA/CMC)."""
+    """
+    MAME ``fixed`` fill size when there is no s1 (zeros).
+
+    Sizes are taken from ``neogeo.xml`` (software list): ``0x40000`` for the
+    ``kf10`` bootleg, ``0x80000`` for PVC / SMA / CHAFIO parents (including
+    sets that use ``NNN-c1.c1`` without ``c1r`` in the name), and ``0x20000``
+    for typical CMC / earlier encrypted boards.
+    """
     blob = " ".join(Path(p).name.lower() for p in filenames)
+    if "kf10-" in blob:
+        return 0x40000
     if "c1r" in blob or "c2r" in blob:
         return 0x80000
+    for p in filenames:
+        fn = Path(p).name.lower()
+        for m in re.finditer(
+            r"(?<![0-9])([0-9]{3})-(?:p1\.|p2\.|m1\.|c1[a-z0-9]*\.c1)", fn
+        ):
+            if int(m.group(1), 10) in _SYNTH_S_MAME_512K_SET_IDS:
+                return 0x80000
     return 0x20000
 
 
