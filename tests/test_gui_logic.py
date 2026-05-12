@@ -4,6 +4,7 @@ Unit tests for non-visual GUI logic in neoconv.gui.
 
 from __future__ import annotations
 
+import json
 import tkinter as tk
 import zipfile
 
@@ -68,6 +69,53 @@ def test_global_reset_is_blocked_when_job_running(monkeypatch):
     # Warning shown, no tab reset executed.
     assert any(c[0] == "Reset blocked" for c in calls)
     assert not any(c[1] == "reset" for c in calls if isinstance(c, tuple) and len(c) == 2)
+
+
+def test_c_chip_size_from_str_auto_uses_half_total():
+    label = gui._C_CHIP_SIZES[0][0]
+    assert gui._c_chip_size_from_str(label, c_total=2048) == 1024
+
+
+def test_c_chip_size_from_str_auto_without_c_total_uses_default():
+    from neoconv.core import C_CHIP_SIZE_DEFAULT
+
+    label = gui._C_CHIP_SIZES[0][0]
+    assert gui._c_chip_size_from_str(label, c_total=None) == C_CHIP_SIZE_DEFAULT
+
+
+def test_c_chip_size_from_str_unknown_falls_back_to_default():
+    from neoconv.core import C_CHIP_SIZE_DEFAULT
+
+    assert gui._c_chip_size_from_str("__no_such_label__") == C_CHIP_SIZE_DEFAULT
+
+
+def test_set_controls_state_toggles_widget():
+    class _Stub:
+        def __init__(self) -> None:
+            self.state = "normal"
+
+        def config(self, *, state: str, **_kw) -> None:
+            self.state = state
+
+    w = _Stub()
+    gui._set_controls_state([w], False)
+    assert w.state == "disabled"
+    gui._set_controls_state([w], True)
+    assert w.state == "normal"
+
+
+def test_load_settings_invalid_json_returns_empty(monkeypatch, tmp_path):
+    path = tmp_path / "cfg.json"
+    path.write_text("not-json", encoding="utf-8")
+    monkeypatch.setattr(gui, "_SETTINGS_PATH", path)
+    assert gui._load_settings() == {}
+
+
+def test_save_settings_roundtrip(monkeypatch, tmp_path):
+    path = tmp_path / "d" / "cfg.json"
+    monkeypatch.setattr(gui, "_SETTINGS_PATH", path)
+    gui._save_settings({"a": 1, "b": "x"})
+    assert json.loads(path.read_text(encoding="utf-8")) == {"a": 1, "b": "x"}
 
 
 def test_global_reset_calls_all_tabs_when_idle():
