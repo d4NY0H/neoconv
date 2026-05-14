@@ -639,11 +639,16 @@ def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
     dir_path   : directory containing ROM files
     diagnostic : if True, print a warning for every file that was not
                  recognized, so the user can diagnose naming issues.
+
+    Notes
+    -----
+    Directory entries are processed in sorted path order so diagnostics and
+    ``source_filenames`` metadata are reproducible across platforms.
     """
     roles: dict[str, bytes] = {}
     ignored: list[str] = []
     all_names: list[str] = []
-    for f in dir_path.iterdir():
+    for f in sorted(dir_path.iterdir()):
         if f.is_file():
             all_names.append(f.name)
             role = _name_to_role(f.name)
