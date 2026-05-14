@@ -236,12 +236,12 @@ class NeoMeta:
                 f"  M ROM        : {len(romset.m):>10,} bytes  ({len(romset.m)/1024:.0f} KB)",
                 f"  V ROM        : {v_total:>10,} bytes  ({v_total/1024/1024:.3f} MB)",
                 f"  C ROM        : {len(romset.c):>10,} bytes  ({len(romset.c)/1024/1024:.3f} MB)",
+                f"  Total        : {total:>10,} bytes  ({total/1024/1024:.2f} MB)",
                 f"  P ROM MD5    : {md5_p}",
                 f"  S ROM MD5    : {md5_s}",
                 f"  M ROM MD5    : {md5_m}",
                 f"  V ROM MD5    : {md5_v}",
                 f"  C ROM MD5    : {md5_c}",
-                f"  Total        : {total:>10,} bytes  ({total/1024/1024:.2f} MB)",
             ]
         return "\n".join(lines)
 
