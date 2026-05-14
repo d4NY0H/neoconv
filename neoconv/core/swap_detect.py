@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from .constants import P_SWAP_SIZE
 
+# Neo Geo cartridge map: plausibility checks on M68000 reset vectors
+# (68000 big-endian longword SP and PC after MAME byte-pair swap).
+M68K_WORK_RAM_START = 0x100000
+M68K_WORK_RAM_END = 0x10FFFF
+M68K_CART_ROM_LOW = 0x000100
+M68K_CART_ROM_HIGH = 0x1FFFFF
+M68K_BIOS_ROM_START = 0xC00000
+M68K_BIOS_ROM_END = 0xC7FFFF
+
 
 def swap_p_banks(p_rom: bytes) -> bytes:
     """
@@ -52,9 +61,9 @@ def _check_m68k_vectors(half: bytes) -> tuple[bool, int, int]:
     Returns (valid, sp, reset_pc).  ``valid`` is True when both values
     fall within Neo Geo address ranges that make physical sense:
 
-    - SP must be in Work RAM  : 0x100000 – 0x10FFFF
-    - Reset PC must be in ROM : 0x000100 – 0x1FFFFF
-      *or* in System ROM/BIOS : 0xC00000 – 0xC7FFFF
+    - SP must be in Work RAM  : ``M68K_WORK_RAM_START`` – ``M68K_WORK_RAM_END``
+    - Reset PC must be in cartridge ROM : ``M68K_CART_ROM_LOW`` – ``M68K_CART_ROM_HIGH``
+      *or* in system ROM/BIOS : ``M68K_BIOS_ROM_START`` – ``M68K_BIOS_ROM_END``
       (some games/hacks vector directly into the BIOS entry point)
     """
     if len(half) < 8:
@@ -62,8 +71,10 @@ def _check_m68k_vectors(half: bytes) -> tuple[bool, int, int]:
     sw = _word_swap(half[:8])
     sp = int.from_bytes(sw[0:4], "big")
     rst = int.from_bytes(sw[4:8], "big")
-    sp_ok = 0x100000 <= sp <= 0x10FFFF
-    rst_ok = (0x000100 <= rst <= 0x1FFFFF) or (0xC00000 <= rst <= 0xC7FFFF)
+    sp_ok = M68K_WORK_RAM_START <= sp <= M68K_WORK_RAM_END
+    rst_ok = (M68K_CART_ROM_LOW <= rst <= M68K_CART_ROM_HIGH) or (
+        M68K_BIOS_ROM_START <= rst <= M68K_BIOS_ROM_END
+    )
     return (sp_ok and rst_ok), sp, rst
 
 
