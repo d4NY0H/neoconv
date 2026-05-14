@@ -131,13 +131,6 @@ def _enforce_latin1_byte_limit(var: tk.StringVar, max_bytes: int) -> None:
     var.trace_add("write", _on_write)
 
 
-def _load_settings() -> dict:
-    try:
-        return json.loads(_SETTINGS_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
 def _save_settings(data: dict) -> None:
     _SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     _SETTINGS_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -168,7 +161,6 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self.title(f"neoconv {__version__}")
         # Allow resizing so the log area can grow on demand.
         self.resizable(True, True)
-        self._settings = _load_settings()
         self._tabs: dict[str, tk.Widget] = {}
         toolbar = ttk.Frame(self)
         toolbar.pack(fill="x", padx=8, pady=(8, 0))
@@ -183,17 +175,12 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         ]:
             self._tabs[key] = tab
             nb.add(tab, text=label)
-            if hasattr(tab, "apply_settings"):
-                tab.apply_settings(self._settings.get(key, {}))
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _on_close(self):
-        data = {}
-        for key, tab in self._tabs.items():
-            if hasattr(tab, "export_settings"):
-                data[key] = tab.export_settings()
+        # Do not persist form fields (paths, metadata); clear any legacy config on exit.
         try:
-            _save_settings(data)
+            _save_settings({})
         except Exception:
             pass
         self.destroy()
@@ -574,30 +561,6 @@ class ExtractTab(ttk.Frame):
     def _request_cancel(self):
         self._cancel_event.set()
         self._log.append("[WARN] Cancellation requested... waiting for safe stop.")
-
-    def export_settings(self) -> dict:
-        return {
-            "input": self._neo.value,
-            "output_mode": self._out_mode.get(),
-            "output_zip": self._out_zip.value,
-            "output_dir": self._out_dir_var.get(),
-            "prefix": self._prefix.get(),
-            "format": self._fmt.get(),
-            "c_chip_size": self._c_size.value_str,
-        }
-
-    def apply_settings(self, data: dict) -> None:
-        if not data:
-            return
-        self._neo.var.set(data.get("input", self._neo.var.get()))
-        self._out_mode.set(data.get("output_mode", self._out_mode.get()))
-        self._out_zip.var.set(data.get("output_zip", self._out_zip.var.get()))
-        self._out_dir_var.set(data.get("output_dir", self._out_dir_var.get()))
-        self._prefix.set(data.get("prefix", self._prefix.get()))
-        self._fmt.set(data.get("format", self._fmt.get()))
-        if data.get("c_chip_size"):
-            self._c_size.var.set(data["c_chip_size"])
-        self._toggle_out()
 
     def reset_defaults(self):
         self._neo.var.set("")
@@ -1003,35 +966,6 @@ class PackTab(ttk.Frame):
 
         _run_in_thread(work)
 
-    def export_settings(self) -> dict:
-        return {
-            "input": self._inp.value,
-            "output": self._out.value,
-            "name": self._vars["name"].get(),
-            "manufacturer": self._vars["mfr"].get(),
-            "year": self._vars["year"].get(),
-            "ngh": self._vars["ngh"].get(),
-            "screenshot": self._vars["screenshot"].get(),
-            "genre": self._genre.get(),
-            "swap_mode": self._swap_p.get(),
-            "diagnostic": bool(self._diagnostic.get()),
-        }
-
-    def apply_settings(self, data: dict) -> None:
-        if not data:
-            return
-        self._inp.var.set(data.get("input", self._inp.var.get()))
-        self._out.var.set(data.get("output", self._out.var.get()))
-        self._vars["name"].set(data.get("name", self._vars["name"].get()))
-        self._vars["mfr"].set(data.get("manufacturer", self._vars["mfr"].get()))
-        self._vars["year"].set(data.get("year", self._vars["year"].get()))
-        self._vars["ngh"].set(data.get("ngh", self._vars["ngh"].get()))
-        self._vars["screenshot"].set(data.get("screenshot", self._vars["screenshot"].get()))
-        self._genre.set(data.get("genre", self._genre.get()))
-        self._swap_p.set(data.get("swap_mode", self._swap_p.get()))
-        self._diagnostic.set(bool(data.get("diagnostic", self._diagnostic.get())))
-        self._schedule_validation()
-
     def reset_defaults(self):
         self._inp.var.set("")
         self._out.var.set("")
@@ -1199,23 +1133,6 @@ class VerifyTab(ttk.Frame):
         self._cancel_event.set()
         self._log.append("[WARN] Cancellation requested... waiting for safe stop.")
 
-    def export_settings(self) -> dict:
-        return {
-            "input": self._neo.value,
-            "prefix": self._prefix.get(),
-            "format": self._fmt.get(),
-            "c_chip_size": self._c_size.value_str,
-        }
-
-    def apply_settings(self, data: dict) -> None:
-        if not data:
-            return
-        self._neo.var.set(data.get("input", self._neo.var.get()))
-        self._prefix.set(data.get("prefix", self._prefix.get()))
-        self._fmt.set(data.get("format", self._fmt.get()))
-        if data.get("c_chip_size"):
-            self._c_size.var.set(data["c_chip_size"])
-
     def reset_defaults(self):
         self._neo.var.set("")
         self._prefix.set("")
@@ -1278,16 +1195,6 @@ class InfoTab(ttk.Frame):
             self._log.append(f"[ERROR] Could not read file: {e}")
         except Exception as e:
             self._log.append(f"[ERROR] Unexpected error: {type(e).__name__}: {e}")
-
-    def export_settings(self) -> dict:
-        return {
-            "input": self._neo.value,
-        }
-
-    def apply_settings(self, data: dict) -> None:
-        if not data:
-            return
-        self._neo.var.set(data.get("input", self._neo.var.get()))
 
     def reset_defaults(self):
         self._neo.var.set("")

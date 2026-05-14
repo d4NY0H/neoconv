@@ -104,13 +104,6 @@ def test_set_controls_state_toggles_widget():
     assert w.state == "normal"
 
 
-def test_load_settings_invalid_json_returns_empty(monkeypatch, tmp_path):
-    path = tmp_path / "cfg.json"
-    path.write_text("not-json", encoding="utf-8")
-    monkeypatch.setattr(gui, "_SETTINGS_PATH", path)
-    assert gui._load_settings() == {}
-
-
 def test_save_settings_roundtrip(monkeypatch, tmp_path):
     path = tmp_path / "d" / "cfg.json"
     monkeypatch.setattr(gui, "_SETTINGS_PATH", path)
