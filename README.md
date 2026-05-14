@@ -363,6 +363,11 @@ For hacks and CD conversions, MAME `verifyroms` may report CRC mismatches becaus
 
 - Caching MD5 checksums inside `NeoMeta.format_info()` for repeated calls on large ROM sets: negligible benefit for typical CLI or GUI use, so it is not planned.
 
+### Planned
+
+- **`--v-bank-size` option** (`extract` command and GUI): V-ROM is currently always split into 2 MB chunks (`V_BANK_SIZE`). Games with non-standard V chip sizes (e.g. 512 KB, 4 MB, 16 MB) require manual renaming after extraction. A `--v-bank-size` flag analogous to `--c-chip-size` is planned.
+- **Internal API cleanup**: helper functions `_apply_swap_p`, `_check_m68k_vectors`, `_interleave_c_chips`, `_name_to_role`, and `_roles_to_romset` are currently exported with a leading underscore despite being part of the semi-public API (used by tests and the GUI). The underscores will be removed in a future release.
+
 ---
 
 ## License
