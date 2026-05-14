@@ -582,14 +582,23 @@ class TestNeoMetaFormatInfo:
         assert "Fighting" in info  # genre 9
         assert "Screenshot #" in info
         assert "123" in info
+        assert "MD5" not in info
 
     def test_with_romset_includes_sizes(self):
+        import hashlib
+
         rs   = make_romset()
         meta = NeoMeta(name="Test")
         info = meta.format_info(rs)
         assert "P ROM" in info
         assert "C ROM" in info
         assert "Total" in info
+        assert "P ROM MD5" in info
+        assert hashlib.md5(rs.p).hexdigest() in info
+        assert hashlib.md5(rs.s).hexdigest() in info
+        assert hashlib.md5(rs.m).hexdigest() in info
+        assert hashlib.md5(rs.v).hexdigest() in info
+        assert hashlib.md5(rs.c).hexdigest() in info
 
     def test_all_genres_present(self):
         for genre_id, genre_name in GENRES.items():

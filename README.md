@@ -267,6 +267,8 @@ Inspecting P-ROM from ZIP: input.zip  (2,097,152 bytes)
 
 ### `info` - display `.neo` metadata
 
+Prints header metadata, ROM region sizes, and **MD5 per region** (P, S, M, V, C) when a full `.neo` is loaded — useful to compare two files that differ only in the header.
+
 ```bash
 neoconv info input.neo
 ```

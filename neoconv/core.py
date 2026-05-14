@@ -213,7 +213,7 @@ class NeoMeta:
     ngh: int = 0
 
     def format_info(self, romset: "RomSet | None" = None) -> str:
-        """Return a human-readable summary, optionally including ROM sizes."""
+        """Return a human-readable summary, optionally including ROM sizes and per-region MD5."""
         lines = [
             f"  Name         : {self.name}",
             f"  Manufacturer : {self.manufacturer}",
@@ -225,12 +225,22 @@ class NeoMeta:
         if romset is not None:
             v_total = len(romset.v)
             total   = NEO_HEADER_SIZE + len(romset.p) + len(romset.s) + len(romset.m) + v_total + len(romset.c)
+            md5_p = hashlib.md5(romset.p).hexdigest()
+            md5_s = hashlib.md5(romset.s).hexdigest()
+            md5_m = hashlib.md5(romset.m).hexdigest()
+            md5_v = hashlib.md5(romset.v).hexdigest()
+            md5_c = hashlib.md5(romset.c).hexdigest()
             lines += [
                 f"  P ROM        : {len(romset.p):>10,} bytes  ({len(romset.p)/1024/1024:.3f} MB)",
                 f"  S ROM        : {len(romset.s):>10,} bytes  ({len(romset.s)/1024:.0f} KB)",
                 f"  M ROM        : {len(romset.m):>10,} bytes  ({len(romset.m)/1024:.0f} KB)",
                 f"  V ROM        : {v_total:>10,} bytes  ({v_total/1024/1024:.3f} MB)",
                 f"  C ROM        : {len(romset.c):>10,} bytes  ({len(romset.c)/1024/1024:.3f} MB)",
+                f"  P ROM MD5    : {md5_p}",
+                f"  S ROM MD5    : {md5_s}",
+                f"  M ROM MD5    : {md5_m}",
+                f"  V ROM MD5    : {md5_v}",
+                f"  C ROM MD5    : {md5_c}",
                 f"  Total        : {total:>10,} bytes  ({total/1024/1024:.2f} MB)",
             ]
         return "\n".join(lines)
