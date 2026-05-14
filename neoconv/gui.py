@@ -833,7 +833,12 @@ class PackTab(ttk.Frame):
                 if swap_p == "auto":
                     from .core import parse_mame_dir, parse_mame_zip
 
-                    rs_probe = (parse_mame_dir if src.is_dir() else parse_mame_zip)(src)
+                    with warnings.catch_warnings(record=True) as wprobe:
+                        warnings.simplefilter("always")
+                        rs_probe = (parse_mame_dir if src.is_dir() else parse_mame_zip)(src)
+                    for wm in wprobe:
+                        self._log.append(f"[WARN] {str(wm.message)}")
+
                     needed, reason = detect_swap_p_needed(rs_probe.p)
                     tag = "auto-swap: YES -" if needed else "auto-swap: no -"
                     self._log.append(f"  {tag} {reason}")
@@ -855,13 +860,16 @@ class PackTab(ttk.Frame):
                         )
                     captured = list(caught)
                 else:
-                    neo_data = fn(
-                        src,
-                        meta,
-                        swap_p=swap_p,
-                        diagnostic=False,
-                        swap_verbose=swap_verbose,
-                    )
+                    with warnings.catch_warnings(record=True) as caught_nd:
+                        warnings.simplefilter("always")
+                        neo_data = fn(
+                            src,
+                            meta,
+                            swap_p=swap_p,
+                            diagnostic=False,
+                            swap_verbose=swap_verbose,
+                        )
+                    captured.extend(caught_nd)
                 for warning_msg in captured:
                     msg = str(warning_msg.message)
                     self._log.append(f"[WARN] {msg}")
