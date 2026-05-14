@@ -39,6 +39,7 @@ from .core import (
     GENRES,
     GENRE_BY_NAME,
     NeoMeta,
+    RomSet,
     build_neo,
     detect_swap_p_needed,
     extract_neo,
@@ -83,9 +84,10 @@ def _meta_from_args(args: argparse.Namespace) -> NeoMeta:
     )
 
 
-def _print_neo_info(neo_data: bytes) -> None:
+def _print_neo_info(neo_data: bytes) -> RomSet:
     romset = parse_neo(neo_data)
     print(romset.meta.format_info(romset))
+    return romset
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +102,7 @@ def cmd_extract(args: argparse.Namespace) -> None:
 
     neo_data = neo_path.read_bytes()
     print(f"Reading: {neo_path}")
-    _print_neo_info(neo_data)
+    _rs = _print_neo_info(neo_data)
     print()
 
     prefix = args.prefix or neo_path.stem
@@ -111,7 +113,6 @@ def cmd_extract(args: argparse.Namespace) -> None:
         c_chip_size = args.c_chip_size
     else:
         # auto: derive from total C size — use full C/2 as one chip pair
-        _rs = parse_neo(neo_data)
         c_chip_size = len(_rs.c) // 2 if len(_rs.c) > 0 else C_CHIP_SIZE_DEFAULT
 
     if args.out_dir:
