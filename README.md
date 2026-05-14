@@ -277,7 +277,7 @@ neoconv info input.neo
 
 ### ROM role detection (MAME naming)
 
-`neoconv` identifies ROM roles by extension and common name patterns inside ZIPs/directories:
+The table below matches the primary rules in `_name_to_role`: extension (e.g. `.p1`, `.c1`) **or** basename suffix patterns such as `-p1.bin`, `_m1.bin`, or a stem ending in `-v3` / `_c2` (same keys as MAME-style `p1`…`c8`).
 
 | Role | Recognized patterns |
 |------|---------------------|
@@ -286,6 +286,10 @@ neoconv info input.neo
 | **M ROM** | `.m1`, `-m1.bin`, `_m1.bin` |
 | **V ROMs** | `.v1`-`.v8`, `-v1.bin`-`-v8.bin`, `_v1.bin`-`_v8.bin` |
 | **C ROMs** | `.c1`-`.c8`, `-c1.bin`-`-c8.bin`, `_c1.bin`-`_c8.bin` |
+
+Not every MAME filename variant is mapped here (for example some `*-c1a.bin`-style names are **not** assigned a **C** role by this table). Those files may still be listed in the archive and participate in **other** logic (see below).
+
+**Synthetic S-ROM (no physical `s1`):** Some MAME parents (e.g. PVC / encrypted boards) ship without a separate text-layer `s1`; the driver uses a zero-filled “fixed” region. If **P** and **M** are present, there is **no** `s1`, but filenames look like a Neo Geo **C1** sprite set, `neoconv` may **inject** a zero-filled `S` region and emit a `UserWarning`. The fill size is chosen from filename heuristics aligned with `neogeo.xml`: `kf10-` bootleg-style names → 256 KiB; `c1r` / `c2r` in a name → 512 KiB; certain **three-digit MAME set IDs** in `NNN-p1.` / `NNN-m1.` / `NNN-c1….c1` patterns (see `_SYNTH_S_MAME_512K_SET_IDS` in `neoconv/core.py`) → 512 KiB; otherwise → 128 KiB. This uses **digits in ROM filenames**, not the TerraOnion **NGH** field stored in a `.neo` header.
 
 Standard BIOS files (`000-lo.lo`, `sfix.sfix`, etc.) are ignored. Unknown files are also ignored unless `--diagnostic` is enabled.
 
