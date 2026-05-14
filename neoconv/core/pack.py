@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from .mame_parse import parse_mame_dir, parse_mame_zip
@@ -19,7 +20,8 @@ def _apply_swap_p(romset: RomSet, swap_p: bool | str, verbose: bool = True) -> R
     - ``"auto"`` : call :func:`detect_swap_p_needed` and swap only when the
                    heuristic says so; prints a short diagnostic line if *verbose*.
 
-    Returns the (possibly modified) romset.
+    Returns a new :class:`RomSet` with the swapped P-ROM; the original is
+    never modified.
     """
     if swap_p == "auto":
         needed, reason = detect_swap_p_needed(romset.p)
@@ -27,9 +29,9 @@ def _apply_swap_p(romset: RomSet, swap_p: bool | str, verbose: bool = True) -> R
             tag = "auto-swap: YES —" if needed else "auto-swap: no  —"
             print(f"  {tag} {reason}")
         if needed:
-            romset.p = swap_p_banks(romset.p)
+            return replace(romset, p=swap_p_banks(romset.p))
     elif swap_p:
-        romset.p = swap_p_banks(romset.p)
+        return replace(romset, p=swap_p_banks(romset.p))
     return romset
 
 
