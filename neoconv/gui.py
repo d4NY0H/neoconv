@@ -1,14 +1,13 @@
 """
 neoconv GUI
 ~~~~~~~~~~~
-Tkinter GUI for neoconv. Feature-complete with the CLI.
+Tkinter GUI for neoconv.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import threading
 import tkinter as tk
 import warnings
@@ -30,7 +29,6 @@ from .core import (
     mame_zip_to_neo,
     pack_psm_role_from_basename,
     parse_neo,
-    verify_roundtrip,
 )
 
 try:
@@ -152,7 +150,6 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         for tab, label in [
             (ExtractTab(nb), "Extract (.neo → files)"),
             (PackTab(nb),    "Pack (files → .neo)"),
-            (VerifyTab(nb),  "Verify (Roundtrip)"),
             (InfoTab(nb),    "Info (.neo)"),
         ]:
             nb.add(tab, text=label)
@@ -918,154 +915,6 @@ class PackTab(ttk.Frame):
             self.after(0, finish)
 
         _run_in_thread(work)
-
-
-# ---------------------------------------------------------------------------
-# Verify tab
-# ---------------------------------------------------------------------------
-
-class VerifyTab(ttk.Frame):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self._is_running = False
-        self._cancel_event = threading.Event()
-        self._build()
-
-    def _build(self):
-        lw = _SECTION_LABEL_WIDTH
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(3, weight=1)
-
-        row = 0
-
-        files_frame = ttk.LabelFrame(self, text="File", padding=(8, 6))
-        files_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
-        files_frame.columnconfigure(0, weight=1)
-        self._neo = _FileRow(
-            files_frame,
-            "Input .neo:",
-            filetypes=[("NEO files", "*.neo"), ("All", "*.*")],
-            label_width=lw,
-        )
-        self._neo.grid(row=0, column=0, sticky="ew")
-        row += 1
-
-        opt_frame = ttk.LabelFrame(self, text="Options", padding=(8, 6))
-        opt_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
-        opt_frame.columnconfigure(1, weight=1)
-
-        self._fmt = tk.StringVar(value="mame")
-        ttk.Label(opt_frame, text="Format:", width=lw, anchor="w").grid(
-            row=0, column=0, sticky="w", pady=2
-        )
-        fmt_inner = ttk.Frame(opt_frame)
-        fmt_inner.grid(row=0, column=1, sticky="w", padx=4, pady=2)
-        ttk.Radiobutton(
-            fmt_inner, text="MAME (.bin)", variable=self._fmt, value="mame"
-        ).pack(side="left", padx=(0, 8))
-        ttk.Radiobutton(
-            fmt_inner, text="Darksoft (.rom)", variable=self._fmt, value="darksoft"
-        ).pack(side="left")
-
-        self._prefix = tk.StringVar()
-        ttk.Label(opt_frame, text="Prefix:", width=lw, anchor="w").grid(
-            row=1, column=0, sticky="w", pady=2
-        )
-        ttk.Entry(opt_frame, textvariable=self._prefix, width=12).grid(
-            row=1, column=1, sticky="w", padx=4, pady=2
-        )
-
-        self._c_size = _SizeCombo(
-            opt_frame,
-            "C Chip Size:",
-            _C_CHIP_SIZES,
-            "auto (C_total ÷ 2)",
-            label_width=lw,
-        )
-        self._c_size.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
-        row += 1
-
-        ctrl_row = ttk.Frame(self)
-        ctrl_row.grid(row=row, column=0, sticky="ew", padx=8, pady=3)
-        self._run_btn = ttk.Button(ctrl_row, text="Verify Roundtrip", command=self._run)
-        self._run_btn.grid(row=0, column=0, padx=(0, 8))
-        self._cancel_btn = ttk.Button(
-            ctrl_row, text="Cancel", command=self._request_cancel, state="disabled"
-        )
-        self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
-        self._busy = _BusySpinner(ctrl_row)
-        self._busy.grid(row=0, column=2, sticky="w")
-        ctrl_row.columnconfigure(3, weight=1)
-        row += 1
-
-        self._log = _LogBox(self, height=16)
-        self._log.grid(row=row, column=0, sticky="nsew", padx=8, pady=(4, 8))
-
-    def _run(self):
-        if self._is_running:
-            return
-        neo_path = Path(self._neo.value)
-        if not neo_path.exists():
-            messagebox.showerror("Error", f"File not found: {neo_path}"); return
-
-        prefix = self._prefix.get().strip() or neo_path.stem
-        fmt    = self._fmt.get()
-        self._log.clear()
-        self._is_running = True
-        self._run_btn.config(state="disabled")
-        self._cancel_btn.config(state="normal")
-        self._cancel_event.clear()
-        self._busy.start()
-
-        def work():
-            try:
-                if self._cancel_event.is_set():
-                    raise RuntimeError("Operation cancelled by user.")
-                original    = neo_path.read_bytes()
-                original_rs = parse_neo(original)
-                c_chip_size = _c_chip_size_from_str(self._c_size.value_str, len(original_rs.c))
-                self._log.append(f"Reading: {neo_path}")
-                self._log.append("Step 1: Extracting ROM data…")
-                zip_data = extract_romset_to_zip(original_rs, name_prefix=prefix,
-                                                 fmt=fmt, c_chip_size=c_chip_size)
-                if self._cancel_event.is_set():
-                    raise RuntimeError("Operation cancelled by user.")
-                self._log.append("Step 2: Repacking to .neo…")
-                meta = original_rs.meta
-                with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tf:
-                    tf.write(zip_data)
-                    tmp_zip = Path(tf.name)
-                try:
-                    rebuilt = mame_zip_to_neo(tmp_zip, meta)
-                finally:
-                    tmp_zip.unlink(missing_ok=True)
-                if self._cancel_event.is_set():
-                    raise RuntimeError("Operation cancelled by user.")
-                self._log.append("Step 3: Comparing ROM data regions...")
-                result = verify_roundtrip(original, rebuilt)
-                self._log.append("")
-                self._log.append("[OK] PASS - extraction is lossless." if result.ok
-                                 else "[ERROR] FAIL - ROM data mismatch!")
-                self._log.append(f"  Original ROM MD5 : {result.original_rom_md5}")
-                self._log.append(f"  Rebuilt  ROM MD5 : {result.rebuilt_rom_md5}")
-                self._log.append(f"  File size match  : {result.file_size_match}")
-                self._log.append(f"  Details          : {result.details}")
-            except Exception as e:
-                self._log.append(f"[ERROR] {e}")
-            finally:
-                self.after(0, self._finish_run)
-
-        _run_in_thread(work)
-
-    def _finish_run(self):
-        self._is_running = False
-        self._run_btn.config(state="normal")
-        self._cancel_btn.config(state="disabled")
-        self._busy.stop()
-
-    def _request_cancel(self):
-        self._cancel_event.set()
-        self._log.append("[WARN] Cancellation requested... waiting for safe stop.")
 
 
 # ---------------------------------------------------------------------------

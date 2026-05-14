@@ -1,8 +1,8 @@
 # neoconv
 
-> A preservation-focused utility for converting between **TerraOnion `.neo` containers** and **MAME / Darksoft Neo Geo ROM sets** with bit-perfect verification.
+> A preservation-focused utility for converting between **TerraOnion `.neo` containers** and **MAME / Darksoft Neo Geo ROM sets**.
 
-`neoconv` handles C-ROM byte-interleaving, **P-ROM half-swap** (default: **auto-detect** from the M68000 vector table, with `yes` / `no` overrides), V-ROM chunking, metadata, and lossless roundtrip verification. It is designed for commercial dumps, hacks, CD conversions, and homebrew.
+`neoconv` handles C-ROM byte-interleaving, **P-ROM half-swap** (default: **auto-detect** from the M68000 vector table, with `yes` / `no` overrides), V-ROM chunking, and metadata. It is designed for commercial dumps, hacks, CD conversions, and homebrew.
 
 ---
 
@@ -12,7 +12,7 @@ Most Neo Geo conversion tools are one-way, outdated, or fragile with non-standar
 
 | Property | Description |
 |----------|-------------|
-| **Reliable** | Integrated `verify` checks your exact ROM data, not a global CRC database |
+| **Reliable** | Deterministic conversions with automated tests for core roundtrip behaviour |
 | **Universal** | Handles commercial sets, hacks, CD conversions, and homebrew |
 | **Transparent** | C interleaving, P-ROM swap (auto or manual), and V chunking are explicit and documented |
 | **Configurable** | Selectable C chip size per title (2 MB default, 4 MB for some games) |
@@ -28,7 +28,6 @@ Both interfaces support the same core workflows:
 |----------|-----|-----|
 | Extract `.neo` to MAME / Darksoft files | ✅ | ✅ |
 | Pack MAME ZIP or directory to `.neo` | ✅ | ✅ |
-| Bit-perfect roundtrip verify | ✅ | ✅ |
 | View `.neo` metadata and region sizes | ✅ | ✅ |
 | P-ROM bank swap (auto-detect + manual override) | ✅ | ✅ |
 | Inspect P-ROM and report swap recommendation | ✅ | — |
@@ -141,7 +140,6 @@ Tabs:
 |-----|-------------|
 | **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory, including C chip size selection |
 | **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap mode selectable via radio (`auto` / `yes` / `no`) |
-| **Verify** | Run full roundtrip verification with selectable format and C chip size |
 | **Info** | Inspect metadata and ROM region sizes from a `.neo` file |
 
 ---
@@ -226,18 +224,6 @@ neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
 
 Available genres: `Other`, `Action`, `BeatEmUp`, `Sports`, `Driving`, `Platformer`, `Mahjong`, `Shooter`, `Quiz`, `Fighting`, `Puzzle`
 
-### `verify` - lossless roundtrip check
-
-```bash
-neoconv verify input.neo --prefix game
-# Exit code: 0 = PASS, 1 = FAIL
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--prefix`, `-p` | *(input stem)* | Prefix for intermediate extraction |
-| `--format`, `-f` | `mame` | Intermediate format: `mame` or `darksoft` |
-
 ### `detect-swap` - inspect P-ROM swap requirement
 
 ```bash
@@ -259,34 +245,6 @@ Inspecting P-ROM from ZIP: input.zip  (2,097,152 bytes)
 
 ```bash
 neoconv info input.neo
-```
-
----
-
-## Bit-perfect guarantee (`verify`)
-
-`verify` proves data integrity with a full roundtrip:
-
-1. Extract ROM regions from `.neo`.
-2. Repack regions to a new `.neo`.
-3. Compare ROM data byte-by-byte.
-
-The metadata header is intentionally excluded; only ROM payload integrity is compared.
-
-Example output:
-
-```bash
-$ neoconv verify input.neo --prefix game
-Verifying: input.neo
-Step 1: Extract -> mame ZIP
-Step 2: Repack ZIP -> .neo
-Step 3: Compare ROM data regions
-
-[OK] PASS - extraction is lossless.
-  Original ROM MD5 : aed6010ef6d15d2dba1a4422e70fc822
-  Rebuilt  ROM MD5 : aed6010ef6d15d2dba1a4422e70fc822
-  File size match  : True
-  Details          : ROM data identical
 ```
 
 ---
@@ -356,7 +314,7 @@ Data:  P, S, M, V, C   (sequentially, sizes from header)
 
 ### About CRC mismatches
 
-For hacks and CD conversions, MAME `verifyroms` may report CRC mismatches because data differs from known dumps. This is expected. Use `neoconv verify` for source-vs-output integrity in your own pipeline.
+For hacks and CD conversions, MAME `verifyroms` may report CRC mismatches because data differs from known dumps. This is expected when the dump is intentionally different from MAME’s reference set.
 
 ---
 

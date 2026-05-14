@@ -21,16 +21,12 @@ Pack MAME zip to .neo:
 Pack directory to .neo:
     neoconv pack ./roms/ --prefix zin --name "Zintrick" --year 1996 \
         --manufacturer UPL --ngh 224 --genre Sports --out zintrick.neo
-
-Verify roundtrip (extract then repack, compare ROM data):
-    neoconv verify game.neo --prefix zin
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-import tempfile
 import zipfile
 from pathlib import Path
 
@@ -48,7 +44,6 @@ from .core import (
     parse_mame_dir,
     parse_mame_zip,
     parse_neo,
-    verify_roundtrip,
 )
 
 
@@ -198,49 +193,6 @@ def cmd_detect_swap(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: verify
-# ---------------------------------------------------------------------------
-
-def cmd_verify(args: argparse.Namespace) -> None:
-    neo_path = Path(args.neo_file)
-    if not neo_path.exists():
-        print(f"Error: file not found: {neo_path}", file=sys.stderr)
-        sys.exit(1)
-
-    original = neo_path.read_bytes()
-    prefix   = args.prefix or neo_path.stem
-    fmt      = getattr(args, "format", "mame")
-
-    print(f"Verifying: {neo_path}")
-    print(f"Step 1: Extract -> {fmt} ZIP")
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp = Path(tmpdir)
-        zip_data = extract_neo_to_zip(original, name_prefix=prefix, fmt=fmt)
-        zip_path = tmp / f"{prefix}.zip"
-        zip_path.write_bytes(zip_data)
-
-        print(f"Step 2: Repack ZIP -> .neo")
-        meta = parse_neo(original).meta
-        rebuilt = mame_zip_to_neo(zip_path, meta)
-
-    print(f"Step 3: Compare ROM data regions")
-    result = verify_roundtrip(original, rebuilt)
-
-    print()
-    if result.ok:
-        print("[OK] PASS - extraction is lossless.")
-    else:
-        print("[ERROR] FAIL - ROM data mismatch!")
-    print(f"  Original ROM MD5 : {result.original_rom_md5}")
-    print(f"  Rebuilt  ROM MD5 : {result.rebuilt_rom_md5}")
-    print(f"  File size match  : {result.file_size_match}")
-    print(f"  Details          : {result.details}")
-
-    sys.exit(0 if result.ok else 1)
-
-
-# ---------------------------------------------------------------------------
 # Subcommand: info
 # ---------------------------------------------------------------------------
 
@@ -325,19 +277,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_detect.add_argument("input", help="Raw P-ROM file or MAME ZIP containing a *-p1.* file.")
     p_detect.set_defaults(func=cmd_detect_swap)
-
-    # -- verify --
-    p_verify = sub.add_parser(
-        "verify",
-        help="Verify lossless roundtrip: extract .neo -> repack -> compare ROM data."
-    )
-    p_verify.add_argument("neo_file", help="Input .neo file")
-    p_verify.add_argument("--prefix", "-p", default="", help="Filename prefix")
-    p_verify.add_argument(
-        "--format", "-f", choices=["mame", "darksoft"], default="mame",
-        help="Intermediate format to use for roundtrip. Default: mame"
-    )
-    p_verify.set_defaults(func=cmd_verify)
 
     # -- info --
     p_info = sub.add_parser("info", help="Show metadata from a .neo file.")
