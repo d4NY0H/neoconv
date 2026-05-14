@@ -4,7 +4,6 @@ Unit tests for non-visual GUI logic in neoconv.gui.
 
 from __future__ import annotations
 
-import json
 import tkinter as tk
 import zipfile
 
@@ -102,13 +101,6 @@ def test_set_controls_state_toggles_widget():
     assert w.state == "disabled"
     gui._set_controls_state([w], True)
     assert w.state == "normal"
-
-
-def test_save_settings_roundtrip(monkeypatch, tmp_path):
-    path = tmp_path / "d" / "cfg.json"
-    monkeypatch.setattr(gui, "_SETTINGS_PATH", path)
-    gui._save_settings({"a": 1, "b": "x"})
-    assert json.loads(path.read_text(encoding="utf-8")) == {"a": 1, "b": "x"}
 
 
 def test_global_reset_calls_all_tabs_when_idle():

@@ -6,7 +6,6 @@ Tkinter GUI for neoconv. Feature-complete with the CLI.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import tempfile
@@ -67,14 +66,6 @@ _V_CHUNK_SIZES = [
     ("16 MB",             16 * 1024 * 1024),
 ]
 
-if os.name == "nt":
-    _SETTINGS_PATH = Path.home() / "AppData" / "Roaming" / "neoconv" / "config.json"
-elif os.name == "posix" and "darwin" in sys.platform:
-    _SETTINGS_PATH = Path.home() / "Library" / "Application Support" / "neoconv" / "config.json"
-else:
-    _SETTINGS_PATH = Path.home() / ".config" / "neoconv" / "config.json"
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -131,11 +122,6 @@ def _enforce_latin1_byte_limit(var: tk.StringVar, max_bytes: int) -> None:
     var.trace_add("write", _on_write)
 
 
-def _save_settings(data: dict) -> None:
-    _SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _SETTINGS_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-
 def _name_to_required_role(filename: str) -> str | None:
     return pack_psm_role_from_basename(filename)
 
@@ -178,11 +164,6 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _on_close(self):
-        # Do not persist form fields (paths, metadata); clear any legacy config on exit.
-        try:
-            _save_settings({})
-        except Exception:
-            pass
         self.destroy()
 
     def _reset_all_tabs(self):
