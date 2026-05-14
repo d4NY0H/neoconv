@@ -144,14 +144,6 @@ Tabs:
 | **Verify** | Run full roundtrip verification with selectable format and C chip size |
 | **Info** | Inspect metadata and ROM region sizes from a `.neo` file |
 
-**Toolbar**
-
-- **Reset all tabs** (top right): restores every tab to its default values (paths, options, Pack metadata, logs where applicable). If a leftover GUI `config.json` from neoconv ≤1.0.x still exists on disk, it is removed as well. This action is disabled while Extract, Pack, or Verify has a running job.
-
-**Session data**
-
-- The GUI does **not** persist fields between launches: nothing is written when you close the window.
-
 ---
 
 ## CLI usage

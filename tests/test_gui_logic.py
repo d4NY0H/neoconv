@@ -44,32 +44,6 @@ def test_scan_required_roles_for_zip(tmp_path):
     assert roles == {"P", "S", "M"}
 
 
-def test_global_reset_is_blocked_when_job_running(monkeypatch):
-    calls: list[tuple[str, str]] = []
-
-    class RunningTab:
-        _is_running = True
-
-        def reset_defaults(self):
-            calls.append(("running", "reset"))
-
-    class IdleTab:
-        _is_running = False
-
-        def reset_defaults(self):
-            calls.append(("idle", "reset"))
-
-    app = gui.NeoConvApp.__new__(gui.NeoConvApp)
-    app._tabs = {"running": RunningTab(), "idle": IdleTab()}
-
-    monkeypatch.setattr(gui.messagebox, "showwarning", lambda title, msg: calls.append((title, msg)))
-    app._reset_all_tabs()
-
-    # Warning shown, no tab reset executed.
-    assert any(c[0] == "Reset blocked" for c in calls)
-    assert not any(c[1] == "reset" for c in calls if isinstance(c, tuple) and len(c) == 2)
-
-
 def test_c_chip_size_from_str_auto_uses_half_total():
     label = gui._C_CHIP_SIZES[0][0]
     assert gui._c_chip_size_from_str(label, c_total=2048) == 1024
@@ -101,36 +75,3 @@ def test_set_controls_state_toggles_widget():
     assert w.state == "disabled"
     gui._set_controls_state([w], True)
     assert w.state == "normal"
-
-
-def test_global_reset_calls_all_tabs_when_idle():
-    calls: list[str] = []
-
-    class IdleTab:
-        _is_running = False
-
-        def reset_defaults(self):
-            calls.append("reset")
-
-    app = gui.NeoConvApp.__new__(gui.NeoConvApp)
-    app._tabs = {"a": IdleTab(), "b": IdleTab()}
-
-    app._reset_all_tabs()
-    assert calls == ["reset", "reset"]
-
-
-def test_reset_all_tabs_removes_legacy_config(monkeypatch, tmp_path):
-    legacy = tmp_path / "config.json"
-    legacy.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(gui, "_legacy_neoconv_gui_config_path", lambda: legacy)
-
-    class IdleTab:
-        _is_running = False
-
-        def reset_defaults(self) -> None:
-            pass
-
-    app = gui.NeoConvApp.__new__(gui.NeoConvApp)
-    app._tabs = {"a": IdleTab()}
-    app._reset_all_tabs()
-    assert not legacy.exists()

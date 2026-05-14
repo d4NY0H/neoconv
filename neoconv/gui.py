@@ -137,15 +137,6 @@ def _scan_required_roles(src: Path) -> set[str]:
     return collect_pack_psm_roles_for_validation(names)
 
 
-def _legacy_neoconv_gui_config_path() -> Path:
-    """Path where older neoconv GUI builds wrote ``config.json`` (no longer read)."""
-    if os.name == "nt":
-        return Path.home() / "AppData" / "Roaming" / "neoconv" / "config.json"
-    if os.name == "posix" and "darwin" in sys.platform:
-        return Path.home() / "Library" / "Application Support" / "neoconv" / "config.json"
-    return Path.home() / ".config" / "neoconv" / "config.json"
-
-
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
@@ -156,40 +147,19 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         self.title(f"neoconv {__version__}")
         # Allow resizing so the log area can grow on demand.
         self.resizable(True, True)
-        self._tabs: dict[str, tk.Widget] = {}
-        toolbar = ttk.Frame(self)
-        toolbar.pack(fill="x", padx=8, pady=(8, 0))
-        ttk.Button(toolbar, text="Reset all tabs", command=self._reset_all_tabs).pack(side="right")
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
-        for key, tab, label in [
-            ("extract", ExtractTab(nb), "Extract (.neo → files)"),
-            ("pack",    PackTab(nb),    "Pack (files → .neo)"),
-            ("verify",  VerifyTab(nb),  "Verify (Roundtrip)"),
-            ("info",    InfoTab(nb),    "Info (.neo)"),
+        for tab, label in [
+            (ExtractTab(nb), "Extract (.neo → files)"),
+            (PackTab(nb),    "Pack (files → .neo)"),
+            (VerifyTab(nb),  "Verify (Roundtrip)"),
+            (InfoTab(nb),    "Info (.neo)"),
         ]:
-            self._tabs[key] = tab
             nb.add(tab, text=label)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _on_close(self):
         self.destroy()
-
-    def _reset_all_tabs(self):
-        if any(getattr(tab, "_is_running", False) for tab in self._tabs.values()):
-            messagebox.showwarning(
-                "Reset blocked",
-                "At least one operation is still running. "
-                "Please wait for completion (or cancel first) before resetting.",
-            )
-            return
-        for tab in self._tabs.values():
-            if hasattr(tab, "reset_defaults"):
-                tab.reset_defaults()
-        try:
-            _legacy_neoconv_gui_config_path().unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -555,17 +525,6 @@ class ExtractTab(ttk.Frame):
     def _request_cancel(self):
         self._cancel_event.set()
         self._log.append("[WARN] Cancellation requested... waiting for safe stop.")
-
-    def reset_defaults(self):
-        self._neo.var.set("")
-        self._out_mode.set("zip")
-        self._out_zip.var.set("")
-        self._out_dir_var.set("")
-        self._prefix.set("")
-        self._fmt.set("mame")
-        self._c_size.var.set("auto (C_total ÷ 2)")
-        self._busy.stop()
-        self._toggle_out()
 
 
 # ---------------------------------------------------------------------------
@@ -960,25 +919,6 @@ class PackTab(ttk.Frame):
 
         _run_in_thread(work)
 
-    def reset_defaults(self):
-        self._inp.var.set("")
-        self._out.var.set("")
-        self._vars["name"].set("Unknown")
-        self._vars["mfr"].set("Unknown")
-        self._vars["year"].set("0")
-        self._vars["ngh"].set("0")
-        self._vars["screenshot"].set("0")
-        self._genre.set("Other")
-        self._swap_p.set("auto")
-        self._diagnostic.set(False)
-        self._busy.stop()
-        self._roles_src_key = None
-        self._roles_missing = None
-        self._roles_scan_error = None
-        self._roles_scan_token += 1
-        self._roles_scan_running_token = None
-        self._schedule_validation()
-
 
 # ---------------------------------------------------------------------------
 # Verify tab
@@ -1127,13 +1067,6 @@ class VerifyTab(ttk.Frame):
         self._cancel_event.set()
         self._log.append("[WARN] Cancellation requested... waiting for safe stop.")
 
-    def reset_defaults(self):
-        self._neo.var.set("")
-        self._prefix.set("")
-        self._fmt.set("mame")
-        self._c_size.var.set("auto (C_total ÷ 2)")
-        self._busy.stop()
-
 
 # ---------------------------------------------------------------------------
 # Info tab
@@ -1189,9 +1122,6 @@ class InfoTab(ttk.Frame):
             self._log.append(f"[ERROR] Could not read file: {e}")
         except Exception as e:
             self._log.append(f"[ERROR] Unexpected error: {type(e).__name__}: {e}")
-
-    def reset_defaults(self):
-        self._neo.var.set("")
 
 
 # ---------------------------------------------------------------------------
