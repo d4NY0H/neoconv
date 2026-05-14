@@ -988,6 +988,8 @@ def mame_zip_to_neo(
     swap_p : False  → no swap (default)
              True   → always swap
              "auto" → heuristic detection via :func:`detect_swap_p_needed`
+             The CLI ``pack`` subcommand and GUI use ``"auto"`` by default; pass
+             ``swap_p="auto"`` here for the same behaviour.
     swap_verbose
         If True (default), print auto-detect diagnostics for ``swap_p="auto"``.
     """
@@ -1010,6 +1012,8 @@ def mame_dir_to_neo(
     swap_p : False  → no swap (default)
              True   → always swap
              "auto" → heuristic detection via :func:`detect_swap_p_needed`
+             The CLI ``pack`` subcommand and GUI use ``"auto"`` by default; pass
+             ``swap_p="auto"`` here for the same behaviour.
     swap_verbose
         If True (default), print auto-detect diagnostics for ``swap_p="auto"``.
     """
