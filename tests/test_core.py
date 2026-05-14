@@ -380,6 +380,14 @@ class TestCoreEdgeCases:
         assert ok is False
         assert sp == 0 and rst == 0
 
+    def test_word_swap_odd_length_raises(self):
+        from neoconv.core.swap_detect import _word_swap
+
+        with pytest.raises(ValueError, match="even byte length"):
+            _word_swap(b"\x00\x01\x02")
+        assert _word_swap(b"\x12\x34") == b"\x34\x12"
+        assert _word_swap(b"") == b""
+
     def test_parse_mame_zip_rejects_corrupt_archive(self, tmp_path):
         bad = tmp_path / "bad.zip"
         bad.write_bytes(b"\xffNOT_A_ZIP\xff")
