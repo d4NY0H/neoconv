@@ -148,8 +148,8 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
         for tab, label in [
-            (ExtractTab(nb), "Extract (.neo → files)"),
             (PackTab(nb),    "Pack (files → .neo)"),
+            (ExtractTab(nb), "Extract (.neo → files)"),
             (InfoTab(nb),    "Info (.neo)"),
         ]:
             nb.add(tab, text=label)
