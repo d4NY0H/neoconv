@@ -322,6 +322,10 @@ Use `neoconv detect-swap <zip>` to inspect a dump without packing it.
 
 V-ROM data is contiguous in `.neo` and split to files on extract. Default chunk size is 2 MB (`v1`, `v2`, ...).
 
+### V1 / V2 header fields (read vs write)
+
+Some `.neo` files split the **total V ROM payload** across the **V1** and **V2** size fields at offsets `0x010` and `0x014`. **neoconv** reads both and merges the bytes in memory. On **output** (`pack`, `build_neo`, `replace_neo_metadata`, `extract` after repack), the header is **normalised**: all V length is stored in **V1** and **V2 is set to 0** (TerraOnion-style layout). Loading or rewriting such a file may emit a **`UserWarning`** so this header normalisation is visible.
+
 ### `.neo` container format
 
 ```text
@@ -329,8 +333,8 @@ Offset 0x000   Magic         b'NEO\x01'  (4 bytes)
 Offset 0x004   P ROM size    uint32 LE
 Offset 0x008   S ROM size    uint32 LE
 Offset 0x00C   M ROM size    uint32 LE
-Offset 0x010   V1 ROM size   uint32 LE   (all V data merged here)
-Offset 0x014   V2 ROM size   uint32 LE   (always 0 in neoconv output)
+Offset 0x010   V1 ROM size   uint32 LE   (all V data merged here on write; read accepts split V1/V2)
+Offset 0x014   V2 ROM size   uint32 LE   (0 when written by neoconv; non-zero allowed on read)
 Offset 0x018   C ROM size    uint32 LE   (total, interleaved)
 Offset 0x01C   Year          uint16 LE
 Offset 0x01E   Genre         uint16 LE

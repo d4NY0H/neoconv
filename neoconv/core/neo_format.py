@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import struct
+import warnings
 from pathlib import Path
 from typing import Optional
 
@@ -61,6 +62,16 @@ def parse_neo(data: bytes) -> RomSet:
         raise ValueError(
             f"File size mismatch: got {len(data)}, expected {expected}. "
             "The .neo file may be corrupt or truncated."
+        )
+
+    if v2_size:
+        warnings.warn(
+            "This .neo header splits the V ROM across V1 and V2 size fields "
+            f"(V1={v1_size} bytes, V2={v2_size} bytes). In-memory V data is merged; "
+            "repacking with build_neo or replace_neo_metadata writes a normalised "
+            "header (all V in the V1 field, V2 set to 0).",
+            UserWarning,
+            stacklevel=2,
         )
 
     offset = NEO_HEADER_SIZE
@@ -167,6 +178,15 @@ def replace_neo_metadata(
         raise ValueError(
             f"File size mismatch: got {len(neo_data)}, expected {expected}. "
             "The .neo file may be corrupt or truncated."
+        )
+
+    if v2_size:
+        warnings.warn(
+            "Input .neo has a non-zero V2 ROM size in the header; the rewritten "
+            "header records all V data in the V1 field (V2 set to 0). "
+            "ROM payload bytes after the 4096-byte header are unchanged.",
+            UserWarning,
+            stacklevel=2,
         )
 
     meta = _meta_from_neo_header_prefix(neo_data)

@@ -257,7 +257,8 @@ class TestBuildParseNeo:
         struct.pack_into("<I", h, 0x20, 0)
         struct.pack_into("<I", h, 0x24, 0)
         neo = bytes(h) + b"AAA" + b"bb"
-        rs = parse_neo(neo)
+        with pytest.warns(UserWarning, match="splits the V ROM"):
+            rs = parse_neo(neo)
         assert rs.v == b"AAAbb"
 
 
@@ -350,7 +351,8 @@ class TestNeoMetadataEdit:
         struct.pack_into("<I", h, 0x20, 0)
         struct.pack_into("<I", h, 0x24, 0)
         neo = bytes(h) + b"AAA" + b"bb"
-        rs = parse_neo(neo)
+        with pytest.warns(UserWarning, match="splits the V ROM"):
+            rs = parse_neo(neo)
         meta2 = NeoMeta(
             name=rs.meta.name,
             manufacturer=rs.meta.manufacturer,
@@ -360,7 +362,9 @@ class TestNeoMetadataEdit:
             ngh=rs.meta.ngh,
         )
         ref = build_neo(rs, meta2)
-        assert replace_neo_metadata(neo, year=3333) == ref
+        with pytest.warns(UserWarning, match="non-zero V2"):
+            new = replace_neo_metadata(neo, year=3333)
+        assert new == ref
 
     def test_write_bytes_atomic(self, tmp_path):
         p = tmp_path / "out.neo"
