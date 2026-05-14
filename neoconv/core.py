@@ -219,6 +219,7 @@ class NeoMeta:
             f"  Year         : {self.year}",
             f"  Genre        : {GENRES.get(self.genre, self.genre)}",
             f"  NGH          : {self.ngh} (0x{self.ngh:04X})",
+            f"  Screenshot # : {self.screenshot}",
         ]
         if romset is not None:
             v_total = len(romset.v)

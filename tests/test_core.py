@@ -511,13 +511,15 @@ class TestVerifyRoundtrip:
 
 class TestNeoMetaFormatInfo:
     def test_without_romset(self):
-        meta = NeoMeta(name="Test Game", manufacturer="SNK", year=1994, ngh=42, genre=9)
+        meta = NeoMeta(name="Test Game", manufacturer="SNK", year=1994, ngh=42, genre=9, screenshot=123)
         info = meta.format_info()
         assert "Test Game" in info
         assert "SNK" in info
         assert "1994" in info
         assert "0x002A" in info
         assert "Fighting" in info  # genre 9
+        assert "Screenshot #" in info
+        assert "123" in info
 
     def test_with_romset_includes_sizes(self):
         rs   = make_romset()
