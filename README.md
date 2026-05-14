@@ -141,7 +141,7 @@ Tabs:
 |-----|-------------|
 | **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap mode selectable via radio (`auto` / `yes` / `no`) |
 | **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory, including C chip size selection |
-| **Edit (.neo)** | Load header fields from a `.neo`, adjust metadata, write back (optional separate output path) |
+| **Edit** | Load header fields from a `.neo`, adjust metadata, write back (optional separate output path) |
 | **Info** | Inspect metadata and ROM region sizes from a `.neo` file |
 
 ---
@@ -289,7 +289,7 @@ The table below matches the primary rules in `_name_to_role`: extension (e.g. `.
 
 Not every MAME filename variant is mapped here (for example some `*-c1a.bin`-style names are **not** assigned a **C** role by this table). Those files may still be listed in the archive and participate in **other** logic (see below).
 
-**Synthetic S-ROM (no physical `s1`):** Some MAME parents (e.g. PVC / encrypted boards) ship without a separate text-layer `s1`; the driver uses a zero-filled “fixed” region. If **P** and **M** are present, there is **no** `s1`, but filenames look like a Neo Geo **C1** sprite set, `neoconv` may **inject** a zero-filled `S` region and emit a `UserWarning`. The fill size is chosen from filename heuristics aligned with `neogeo.xml`: `kf10-` bootleg-style names → 256 KiB; `c1r` / `c2r` in a name → 512 KiB; certain **three-digit MAME set IDs** in `NNN-p1.` / `NNN-m1.` / `NNN-c1….c1` patterns (see `_SYNTH_S_MAME_512K_SET_IDS` in `neoconv/core.py`) → 512 KiB; otherwise → 128 KiB. This uses **digits in ROM filenames**, not the TerraOnion **NGH** field stored in a `.neo` header.
+**Synthetic S-ROM (no physical `s1`):** Some MAME parents (e.g. PVC / encrypted boards) ship without a separate text-layer `s1`; the driver uses a zero-filled “fixed” region. If **P** and **M** are present, there is **no** `s1`, but filenames look like a Neo Geo **C1** sprite set, `neoconv` may **inject** a zero-filled `S` region and emit a `UserWarning`. The fill size is chosen from filename heuristics aligned with `neogeo.xml`: `kf10-` bootleg-style names → 256 KiB; `c1r` / `c2r` in a name → 512 KiB; certain **three-digit MAME set IDs** in `NNN-p1.` / `NNN-m1.` / `NNN-c1….c1` patterns (see `_SYNTH_S_MAME_512K_SET_IDS` in `neoconv/core.py`) → 512 KiB; otherwise → 128 KiB. This uses **digits in ROM filenames**.
 
 Standard BIOS files (`000-lo.lo`, `sfix.sfix`, etc.) are ignored. Unknown files are also ignored unless `--diagnostic` is enabled.
 
