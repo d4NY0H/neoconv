@@ -59,18 +59,35 @@ from .core import (
 # ---------------------------------------------------------------------------
 
 def _resolve_genre(value: str) -> int:
+    """Convert a genre name or numeric id string to its integer id.
+
+    Raises :class:`ValueError` for unrecognised values so callers (including
+    tests) can catch it without having to intercept ``sys.exit``.
+    """
     try:
         n = int(value)
         if n not in GENRES:
-            raise ValueError
+            raise ValueError(f"genre id {n} is not valid")
         return n
     except ValueError:
         key = value.lower()
         if key not in GENRE_BY_NAME:
             valid = ", ".join(GENRES.values())
-            print(f"Error: unknown genre '{value}'. Valid genres: {valid}", file=sys.stderr)
-            sys.exit(1)
+            raise ValueError(f"unknown genre '{value}'. Valid genres: {valid}")
         return GENRE_BY_NAME[key]
+
+
+def _genre_type(value: str) -> int:
+    """argparse ``type=`` adapter for ``--genre``.
+
+    Wraps :func:`_resolve_genre` and converts :class:`ValueError` to
+    :class:`argparse.ArgumentTypeError` so argparse prints a clean usage
+    error instead of a traceback.
+    """
+    try:
+        return _resolve_genre(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _meta_from_args(args: argparse.Namespace) -> NeoMeta:
@@ -78,7 +95,7 @@ def _meta_from_args(args: argparse.Namespace) -> NeoMeta:
         name=args.name,
         manufacturer=args.manufacturer,
         year=args.year,
-        genre=_resolve_genre(args.genre),
+        genre=args.genre,  # already an int — resolved by argparse via _genre_type
         ngh=args.ngh,
         screenshot=getattr(args, "screenshot", 0),
     )
@@ -216,7 +233,7 @@ def cmd_edit(args: argparse.Namespace) -> None:
     if args.year is not None:
         updates["year"] = args.year
     if args.genre is not None:
-        updates["genre"] = _resolve_genre(args.genre)
+        updates["genre"] = args.genre  # already int — resolved by argparse via _genre_type
     if args.ngh is not None:
         updates["ngh"] = args.ngh
     if args.screenshot is not None:
@@ -294,7 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pack.add_argument("--manufacturer", "-m", default="Unknown", help="Manufacturer")
     p_pack.add_argument("--year", "-y", type=int, default=0, help="Release year")
     p_pack.add_argument(
-        "--genre", "-g", default="Other",
+        "--genre", "-g", default=_genre_type("Other"), type=_genre_type,
         help=f"Genre: {', '.join(GENRES.values())}"
     )
     p_pack.add_argument("--ngh", type=int, default=0, help="NGH number")
@@ -345,6 +362,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--genre",
         "-g",
         default=None,
+        type=_genre_type,
         metavar="NAME_OR_ID",
         help=f"Genre name or id ({', '.join(GENRES.values())})",
     )
