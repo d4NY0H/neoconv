@@ -27,9 +27,19 @@ def swap_p_banks(p_rom: bytes) -> bytes:
 
 
 def _word_swap(data: bytes) -> bytes:
-    """Swap every pair of adjacent bytes (MAME P-ROM byte-order correction)."""
+    """
+    Swap every pair of adjacent bytes (MAME P-ROM byte-order correction).
+
+    *data* must have an even length (16-bit word aligned); odd lengths raise
+    :class:`ValueError`.
+    """
+    n = len(data)
+    if n % 2 != 0:
+        raise ValueError(
+            f"P-ROM word-swap requires an even byte length (got {n} bytes)."
+        )
     b = bytearray(data)
-    for i in range(0, len(b) - 1, 2):
+    for i in range(0, n, 2):
         b[i], b[i + 1] = b[i + 1], b[i]
     return bytes(b)
 
