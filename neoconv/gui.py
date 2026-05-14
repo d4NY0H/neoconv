@@ -829,6 +829,8 @@ class PackTab(ttk.Frame):
                     raise RuntimeError("Operation cancelled by user.")
                 self._log.append(f"Packing: {src}")
 
+                pack_warnings: list[warnings.WarningMessage] = []
+
                 # Auto-swap: Diagnose ins Log (nicht nochmal auf stdout)
                 if swap_p == "auto":
                     from .core import parse_mame_dir, parse_mame_zip
@@ -836,8 +838,7 @@ class PackTab(ttk.Frame):
                     with warnings.catch_warnings(record=True) as wprobe:
                         warnings.simplefilter("always")
                         rs_probe = (parse_mame_dir if src.is_dir() else parse_mame_zip)(src)
-                    for wm in wprobe:
-                        self._log.append(f"[WARN] {str(wm.message)}")
+                    pack_warnings.extend(wprobe)
 
                     needed, reason = detect_swap_p_needed(rs_probe.p)
                     tag = "auto-swap: YES -" if needed else "auto-swap: no -"
@@ -847,7 +848,6 @@ class PackTab(ttk.Frame):
 
                 fn = mame_dir_to_neo if src.is_dir() else mame_zip_to_neo
                 swap_verbose = swap_p != "auto"
-                captured: list[warnings.WarningMessage] = []
                 if diagnostic:
                     with warnings.catch_warnings(record=True) as caught:
                         warnings.simplefilter("always")
@@ -858,7 +858,7 @@ class PackTab(ttk.Frame):
                             diagnostic=True,
                             swap_verbose=swap_verbose,
                         )
-                    captured = list(caught)
+                    pack_warnings.extend(caught)
                 else:
                     with warnings.catch_warnings(record=True) as caught_nd:
                         warnings.simplefilter("always")
@@ -869,10 +869,14 @@ class PackTab(ttk.Frame):
                             diagnostic=False,
                             swap_verbose=swap_verbose,
                         )
-                    captured.extend(caught_nd)
-                for warning_msg in captured:
-                    msg = str(warning_msg.message)
-                    self._log.append(f"[WARN] {msg}")
+                    pack_warnings.extend(caught_nd)
+
+                _seen_warn: set[str] = set()
+                for wm in pack_warnings:
+                    msg = str(wm.message)
+                    if msg not in _seen_warn:
+                        _seen_warn.add(msg)
+                        self._log.append(f"[WARN] {msg}")
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
                 dest = out or src.with_suffix(".neo")
