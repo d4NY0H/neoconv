@@ -350,6 +350,10 @@ Data:  P, S, M, V, C   (sequentially, sizes from header)
 
 For hacks and CD conversions, MAME `verifyroms` may report CRC mismatches because data differs from known dumps. This is expected when the dump is intentionally different from MAME’s reference set.
 
+### Out of scope
+
+- Caching MD5 checksums inside `NeoMeta.format_info()` for repeated calls on large ROM sets: negligible benefit for typical CLI or GUI use, so it is not planned.
+
 ---
 
 ## License
