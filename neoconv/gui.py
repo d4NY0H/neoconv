@@ -7,12 +7,15 @@ Tkinter GUI for neoconv.
 from __future__ import annotations
 
 import os
+import queue
 import sys
 import threading
 import tkinter as tk
 import warnings
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from . import __version__
@@ -75,6 +78,65 @@ _V_CHUNK_SIZES = [
 def _run_in_thread(fn, *args):
     t = threading.Thread(target=fn, args=args, daemon=True)
     t.start()
+
+
+class _GuiWorkerBridge:
+    """
+    Worker threads must never touch Tk widgets. They only :meth:`post_log` /
+    :meth:`post_call`; the Tk main thread drains the queue via :meth:`start_pump`.
+    """
+
+    _POLL_MS = 40
+
+    def __init__(self, host: tk.Misc, log: scrolledtext.ScrolledText) -> None:
+        self._host = host
+        self._log = log
+        self._q: queue.SimpleQueue[tuple[str, object]] = queue.SimpleQueue()
+        self._after_id: str | None = None
+        self._should_continue: Callable[[], bool] = lambda: False
+
+    def clear_queue(self) -> None:
+        while True:
+            try:
+                self._q.get_nowait()
+            except queue.Empty:
+                break
+
+    def cancel_pump(self) -> None:
+        if self._after_id is not None:
+            try:
+                self._host.after_cancel(self._after_id)
+            except tk.TclError:
+                pass
+            self._after_id = None
+
+    def post_log(self, text: str) -> None:
+        self._q.put(("log", text))
+
+    def post_call(self, fn: Callable[[], None]) -> None:
+        self._q.put(("call", fn))
+
+    def start_pump(self, should_continue: Callable[[], bool]) -> None:
+        """Schedule queue draining on the Tk main thread (call only from that thread)."""
+        self._should_continue = should_continue
+        if self._after_id is None:
+            self._pump()
+
+    def _pump(self) -> None:
+        try:
+            while True:
+                kind, payload = self._q.get_nowait()
+                if kind == "log":
+                    self._log.append(str(payload))
+                else:
+                    cast(Callable[[], None], payload)()
+        except queue.Empty:
+            pass
+
+        if not self._q.empty() or self._should_continue():
+            self._after_id = self._host.after(self._POLL_MS, self._pump)
+        else:
+            self._after_id = None
 
 
 def _c_chip_size_from_str(s: str, c_total: int | None = None) -> int:
@@ -456,6 +518,7 @@ class ExtractTab(ttk.Frame):
 
         self._log = _LogBox(self, height=16)
         self._log.grid(row=row, column=0, sticky="nsew", padx=8, pady=(4, 8))
+        self._wbridge = _GuiWorkerBridge(self, self._log)
         self._toggle_out()
 
     def _toggle_out(self):
@@ -474,11 +537,14 @@ class ExtractTab(ttk.Frame):
         prefix = self._prefix.get().strip() or neo_path.stem
         fmt    = self._fmt.get()
         self._log.clear()
+        self._wbridge.cancel_pump()
+        self._wbridge.clear_queue()
         self._is_running = True
         self._run_btn.config(state="disabled")
         self._cancel_btn.config(state="normal")
         self._cancel_event.clear()
         self._busy.start()
+        self._wbridge.start_pump(lambda: self._is_running)
 
         def work():
             try:
@@ -487,8 +553,8 @@ class ExtractTab(ttk.Frame):
                 neo_data    = neo_path.read_bytes()
                 romset      = parse_neo(neo_data)
                 c_chip_size = _c_chip_size_from_str(self._c_size.value_str, len(romset.c))
-                self._log.append(f"Reading: {neo_path}")
-                self._log.append(f"C chip size: {c_chip_size:,} bytes")
+                self._wbridge.post_log(f"Reading: {neo_path}")
+                self._wbridge.post_log(f"C chip size: {c_chip_size:,} bytes")
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
 
@@ -497,24 +563,24 @@ class ExtractTab(ttk.Frame):
                               else neo_path.parent / neo_path.stem
                     written = extract_romset(romset, out_dir, name_prefix=prefix,
                                              fmt=fmt, c_chip_size=c_chip_size)
-                    self._log.append(f"Extracted {len(written)} files to: {out_dir}")
+                    self._wbridge.post_log(f"Extracted {len(written)} files to: {out_dir}")
                     for _, p in sorted(written.items()):
-                        self._log.append(f"  {p.name:<30} {p.stat().st_size:>10,} bytes")
+                        self._wbridge.post_log(f"  {p.name:<30} {p.stat().st_size:>10,} bytes")
                 else:
                     dest = Path(self._out_zip.value) if self._out_zip.value \
                            else neo_path.with_suffix(f".{fmt}.zip")
                     zip_data = extract_romset_to_zip(romset, name_prefix=prefix,
                                                      fmt=fmt, c_chip_size=c_chip_size)
                     dest.write_bytes(zip_data)
-                    self._log.append(f"Written: {dest}  ({len(zip_data)/1024/1024:.2f} MB)")
+                    self._wbridge.post_log(f"Written: {dest}  ({len(zip_data)/1024/1024:.2f} MB)")
                     with zipfile.ZipFile(dest) as zf:
                         for info in zf.infolist():
-                            self._log.append(f"  {info.filename:<30} {info.file_size:>10,} bytes")
-                self._log.append("[OK] Done.")
+                            self._wbridge.post_log(f"  {info.filename:<30} {info.file_size:>10,} bytes")
+                self._wbridge.post_log("[OK] Done.")
             except Exception as e:
-                self._log.append(f"[ERROR] {e}")
+                self._wbridge.post_log(f"[ERROR] {e}")
             finally:
-                self.after(0, self._finish_run)
+                self._wbridge.post_call(self._finish_run)
 
         _run_in_thread(work)
 
@@ -694,6 +760,7 @@ class PackTab(ttk.Frame):
 
         self._log = _LogBox(self, height=16)
         self._log.grid(row=row, column=0, sticky="nsew", padx=8, pady=(4, 8))
+        self._wbridge = _GuiWorkerBridge(self, self._log)
         self._schedule_validation()
 
     def _sync_pack_status_wraplength(self, event: tk.Event) -> None:
@@ -735,17 +802,22 @@ class PackTab(ttk.Frame):
         )
         diagnostic = self._diagnostic.get()
         self._log.clear()
+        self._wbridge.cancel_pump()
+        self._wbridge.clear_queue()
         self._is_running = True
         self._run_btn.config(state="disabled")
         self._cancel_btn.config(state="normal")
         self._cancel_event.clear()
         self._busy.start()
+        self._wbridge.start_pump(
+            lambda: self._is_running or self._roles_scan_running_token is not None
+        )
 
         def work():
             try:
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
-                self._log.append(f"Packing: {src}")
+                self._wbridge.post_log(f"Packing: {src}")
 
                 pack_warnings: list[warnings.WarningMessage] = []
 
@@ -760,7 +832,7 @@ class PackTab(ttk.Frame):
 
                     needed, reason = detect_swap_p_needed(rs_probe.p)
                     tag = "auto-swap: YES -" if needed else "auto-swap: no -"
-                    self._log.append(f"  {tag} {reason}")
+                    self._wbridge.post_log(f"  {tag} {reason}")
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
 
@@ -794,17 +866,17 @@ class PackTab(ttk.Frame):
                     msg = str(wm.message)
                     if msg not in _seen_warn:
                         _seen_warn.add(msg)
-                        self._log.append(f"[WARN] {msg}")
+                        self._wbridge.post_log(f"[WARN] {msg}")
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
                 dest = out or src.with_suffix(".neo")
                 dest.write_bytes(neo_data)
-                self._log.append(f"Written: {dest}  ({len(neo_data)/1024/1024:.2f} MB)")
-                self._log.append("[OK] Done.")
+                self._wbridge.post_log(f"Written: {dest}  ({len(neo_data)/1024/1024:.2f} MB)")
+                self._wbridge.post_log("[OK] Done.")
             except Exception as e:
-                self._log.append(f"[ERROR] {e}")
+                self._wbridge.post_log(f"[ERROR] {e}")
             finally:
-                self.after(0, self._finish_run)
+                self._wbridge.post_call(self._finish_run)
 
         _run_in_thread(work)
 
@@ -899,6 +971,9 @@ class PackTab(ttk.Frame):
 
     def _start_roles_scan(self, src: Path, src_key: tuple, token: int) -> None:
         self._roles_scan_running_token = token
+        self._wbridge.start_pump(
+            lambda: self._is_running or self._roles_scan_running_token is not None
+        )
 
         def work() -> None:
             missing: list[str] = []
@@ -917,7 +992,7 @@ class PackTab(ttk.Frame):
                 self._roles_missing = None if error else missing
                 self._schedule_validation()
 
-            self.after(0, finish)
+            self._wbridge.post_call(finish)
 
         _run_in_thread(work)
 
@@ -1026,6 +1101,7 @@ class EditTab(ttk.Frame):
 
         self._log = _LogBox(self, height=16)
         self._log.grid(row=row, column=0, sticky="nsew", padx=8, pady=(4, 8))
+        self._wbridge = _GuiWorkerBridge(self, self._log)
 
     def _schedule_meta_load(self, *_args) -> None:
         if self._suppress_meta_fill:
@@ -1080,17 +1156,20 @@ class EditTab(ttk.Frame):
         dest = Path(out_raw) if out_raw else inp
 
         self._log.clear()
+        self._wbridge.cancel_pump()
+        self._wbridge.clear_queue()
         self._is_running = True
         self._run_btn.config(state="disabled")
         self._cancel_btn.config(state="normal")
         self._cancel_event.clear()
         self._busy.start()
+        self._wbridge.start_pump(lambda: self._is_running)
 
         def work() -> None:
             try:
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
-                self._log.append(f"Reading: {inp}")
+                self._wbridge.post_log(f"Reading: {inp}")
                 data = inp.read_bytes()
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
@@ -1106,14 +1185,14 @@ class EditTab(ttk.Frame):
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
                 write_bytes_atomic(dest, new_data)
-                self._log.append(f"Written: {dest}")
+                self._wbridge.post_log(f"Written: {dest}")
                 rs = parse_neo(new_data)
-                self._log.append(rs.meta.format_info(rs))
-                self._log.append("[OK] Metadata updated.")
+                self._wbridge.post_log(rs.meta.format_info(rs))
+                self._wbridge.post_log("[OK] Metadata updated.")
             except Exception as e:
-                self._log.append(f"[ERROR] {e}")
+                self._wbridge.post_log(f"[ERROR] {e}")
             finally:
-                self.after(0, self._finish_run)
+                self._wbridge.post_call(self._finish_run)
 
         _run_in_thread(work)
 
