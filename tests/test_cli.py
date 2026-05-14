@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from neoconv import cli
+from neoconv.core import parse_neo
 
 
 def _mini_zip_bytes() -> bytes:
@@ -290,6 +291,77 @@ def test_cmd_info_missing_file_exits(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         cli.cmd_info(argparse.Namespace(neo_file=str(tmp_path / "missing.neo")))
     assert exc.value.code == 1
+
+
+def _mini_neo_bytes() -> bytes:
+    from neoconv.core import NeoMeta, RomSet, _interleave_c_chips, build_neo
+
+    a = bytes([0x11]) * 256
+    b = bytes([0x22]) * 256
+    c = _interleave_c_chips([a, b])
+    rs = RomSet(
+        p=bytes([0xAA]) * 512,
+        s=bytes([0xBB]) * 64,
+        m=bytes([0xCC]) * 64,
+        v=bytes([0xDD]) * 128,
+        c=c,
+    )
+    return build_neo(
+        rs,
+        NeoMeta(name="One", manufacturer="Two", year=1999, genre=2, ngh=5, screenshot=1),
+    )
+
+
+def _edit_ns(path: Path, **over) -> argparse.Namespace:
+    base = {
+        "neo_file": str(path),
+        "out": "",
+        "name": None,
+        "manufacturer": None,
+        "year": None,
+        "genre": None,
+        "ngh": None,
+        "screenshot": None,
+    }
+    base.update(over)
+    return argparse.Namespace(**base)
+
+
+def test_cmd_edit_requires_at_least_one_field(monkeypatch, tmp_path):
+    neo = tmp_path / "x.neo"
+    neo.write_bytes(_mini_neo_bytes())
+    monkeypatch.setattr(cli.sys, "exit", _exit_raiser)
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_edit(_edit_ns(neo))
+    assert exc.value.code == 1
+
+
+def test_cmd_edit_name_in_place(tmp_path, capsys):
+    neo = tmp_path / "x.neo"
+    neo.write_bytes(_mini_neo_bytes())
+    cli.cmd_edit(_edit_ns(neo, name="Renamed"))
+    assert parse_neo(neo.read_bytes()).meta.name == "Renamed"
+    out = capsys.readouterr().out
+    assert "Written:" in out
+    assert "Renamed" in out
+
+
+def test_cmd_edit_writes_separate_out(tmp_path):
+    neo = tmp_path / "in.neo"
+    out = tmp_path / "out.neo"
+    neo.write_bytes(_mini_neo_bytes())
+    orig = neo.read_bytes()
+    cli.cmd_edit(_edit_ns(neo, out=str(out), manufacturer="Acme"))
+    assert neo.read_bytes() == orig
+    assert parse_neo(out.read_bytes()).meta.manufacturer == "Acme"
+
+
+def test_build_parser_edit_subcommand():
+    parser = cli.build_parser()
+    args = parser.parse_args(["edit", "game.neo", "--year", "2000"])
+    assert args.command == "edit"
+    assert args.year == 2000
+    assert args.name is None
 
 
 def test_build_parser_requires_subcommand():

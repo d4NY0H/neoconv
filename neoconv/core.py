@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import re
 import struct
 import warnings
@@ -291,14 +292,43 @@ class RomSet:
 # .neo parsing
 # ---------------------------------------------------------------------------
 
-def parse_neo(data: bytes) -> RomSet:
-    """Parse a .neo file and return a RomSet."""
+def _meta_from_neo_header_prefix(data: bytes) -> NeoMeta:
+    """Parse ``NeoMeta`` from the first ``NEO_HEADER_SIZE`` bytes of a .neo file."""
+    if len(data) < NEO_HEADER_SIZE:
+        raise ValueError("File too small to be a valid .neo container.")
     if data[:4] != NEO_MAGIC:
         raise ValueError(
             f"Not a valid .neo file (magic={data[:4]!r}, expected {NEO_MAGIC!r})"
         )
-    if len(data) < NEO_HEADER_SIZE:
-        raise ValueError("File too small to be a valid .neo container.")
+    year        = struct.unpack_from("<H", data, 0x1C)[0]
+    genre       = struct.unpack_from("<H", data, 0x1E)[0]
+    screenshot  = struct.unpack_from("<I", data, 0x20)[0]
+    ngh         = struct.unpack_from("<I", data, 0x24)[0]
+    name        = data[0x2C:0x4D].split(b"\x00")[0].decode("latin-1")
+    manufacturer= data[0x4D:0x5E].split(b"\x00")[0].decode("latin-1")
+    return NeoMeta(
+        name=name,
+        manufacturer=manufacturer,
+        year=year,
+        genre=genre,
+        screenshot=screenshot,
+        ngh=ngh,
+    )
+
+
+def parse_neo_header_metadata(data: bytes) -> NeoMeta:
+    """
+    Read metadata from a .neo header without loading ROM regions.
+
+    *data* must contain at least ``NEO_HEADER_SIZE`` (4096) bytes from the
+    start of the file (typically read with ``path.read_bytes()[:NEO_HEADER_SIZE]``).
+    """
+    return _meta_from_neo_header_prefix(data)
+
+
+def parse_neo(data: bytes) -> RomSet:
+    """Parse a .neo file and return a RomSet."""
+    meta = _meta_from_neo_header_prefix(data)
 
     p_size  = struct.unpack_from("<I", data, 0x04)[0]
     s_size  = struct.unpack_from("<I", data, 0x08)[0]
@@ -306,13 +336,6 @@ def parse_neo(data: bytes) -> RomSet:
     v1_size = struct.unpack_from("<I", data, 0x10)[0]
     v2_size = struct.unpack_from("<I", data, 0x14)[0]
     c_size  = struct.unpack_from("<I", data, 0x18)[0]
-
-    year        = struct.unpack_from("<H", data, 0x1C)[0]
-    genre       = struct.unpack_from("<H", data, 0x1E)[0]
-    screenshot  = struct.unpack_from("<I", data, 0x20)[0]
-    ngh         = struct.unpack_from("<I", data, 0x24)[0]
-    name        = data[0x2C:0x4D].split(b"\x00")[0].decode("latin-1")
-    manufacturer= data[0x4D:0x5E].split(b"\x00")[0].decode("latin-1")
 
     expected = NEO_HEADER_SIZE + p_size + s_size + m_size + v1_size + v2_size + c_size
     if len(data) != expected:
@@ -330,14 +353,6 @@ def parse_neo(data: bytes) -> RomSet:
         v_rom += data[offset : offset + v2_size]; offset += v2_size
     c_rom  = data[offset : offset + c_size]
 
-    meta = NeoMeta(
-        name=name,
-        manufacturer=manufacturer,
-        year=year,
-        genre=genre,
-        screenshot=screenshot,
-        ngh=ngh,
-    )
     return RomSet(p=p_rom, s=s_rom, m=m_rom, v=v_rom, c=c_rom, meta=meta)
 
 
@@ -692,6 +707,58 @@ def build_neo(romset: RomSet, meta: NeoMeta) -> bytes:
     header[0x4D : 0x4D + len(mfr_b)] = mfr_b
 
     return bytes(header) + romset.p + romset.s + romset.m + romset.v + romset.c
+
+
+def replace_neo_metadata(
+    neo_data: bytes,
+    *,
+    name: Optional[str] = None,
+    manufacturer: Optional[str] = None,
+    year: Optional[int] = None,
+    genre: Optional[int] = None,
+    ngh: Optional[int] = None,
+    screenshot: Optional[int] = None,
+) -> bytes:
+    """
+    Return a new .neo file with updated header metadata. ROM regions are unchanged.
+
+    Parameters set to ``None`` are left unchanged from *neo_data*.
+    """
+    rs = parse_neo(neo_data)
+    meta = rs.meta
+    if name is not None:
+        meta.name = name
+    if manufacturer is not None:
+        meta.manufacturer = manufacturer
+    if year is not None:
+        meta.year = year
+    if genre is not None:
+        meta.genre = genre
+    if ngh is not None:
+        meta.ngh = ngh
+    if screenshot is not None:
+        meta.screenshot = screenshot
+    return build_neo(rs, meta)
+
+
+def write_bytes_atomic(path: Path | str, data: bytes) -> None:
+    """
+    Write *data* to *path* via a temporary file in the same directory and
+    ``os.replace`` (atomic on POSIX when replacing an existing file).
+    """
+    p = Path(path).resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.parent / f".neoconv_{p.name}.{os.getpid()}.tmp"
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, p)
+    except BaseException:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        raise
 
 
 # ---------------------------------------------------------------------------

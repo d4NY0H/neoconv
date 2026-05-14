@@ -33,8 +33,11 @@ from neoconv.core import (
     parse_mame_dir,
     parse_mame_zip,
     parse_neo,
+    parse_neo_header_metadata,
+    replace_neo_metadata,
     swap_p_banks,
     verify_roundtrip,
+    write_bytes_atomic,
 )
 
 
@@ -256,6 +259,65 @@ class TestBuildParseNeo:
         neo = bytes(h) + b"AAA" + b"bb"
         rs = parse_neo(neo)
         assert rs.v == b"AAAbb"
+
+
+# ---------------------------------------------------------------------------
+# Metadata-only .neo edits
+# ---------------------------------------------------------------------------
+
+class TestNeoMetadataEdit:
+    def test_parse_neo_header_metadata_matches_full_parse(self):
+        rs = make_romset()
+        meta = NeoMeta(
+            name="HdrX",
+            manufacturer="HdrY",
+            year=2002,
+            genre=9,
+            ngh=99,
+            screenshot=7,
+        )
+        neo = build_neo(rs, meta)
+        quick = parse_neo_header_metadata(neo[:NEO_HEADER_SIZE])
+        assert quick == parse_neo(neo).meta
+
+    def test_parse_neo_header_metadata_too_short(self):
+        with pytest.raises(ValueError, match="too small"):
+            parse_neo_header_metadata(NEO_MAGIC + b"\x00" * 64)
+
+    def test_replace_neo_metadata_rom_regions_unchanged(self):
+        rs = make_romset()
+        meta = NeoMeta(
+            name="Old",
+            manufacturer="SNK",
+            year=1990,
+            genre=1,
+            ngh=2,
+            screenshot=3,
+        )
+        neo = build_neo(rs, meta)
+        new = replace_neo_metadata(neo, name="NewName")
+        before = parse_neo(neo)
+        after = parse_neo(new)
+        assert after.meta.name == "NewName"
+        assert after.meta.manufacturer == before.meta.manufacturer
+        assert after.meta.year == before.meta.year
+        assert after.p == before.p and after.c == before.c
+
+    def test_replace_neo_metadata_partial_cli_semantics(self):
+        neo = make_neo(make_romset())
+        old = parse_neo(neo)
+        new = replace_neo_metadata(neo, year=2099, ngh=123)
+        m = parse_neo(new).meta
+        assert m.year == 2099
+        assert m.ngh == 123
+        assert m.name == old.meta.name
+
+    def test_write_bytes_atomic(self, tmp_path):
+        p = tmp_path / "out.neo"
+        write_bytes_atomic(p, b"alpha")
+        assert p.read_bytes() == b"alpha"
+        write_bytes_atomic(p, b"beta")
+        assert p.read_bytes() == b"beta"
 
 
 # ---------------------------------------------------------------------------

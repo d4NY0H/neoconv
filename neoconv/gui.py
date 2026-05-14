@@ -20,6 +20,7 @@ from .core import (
     C_CHIP_SIZE_DEFAULT,
     GENRE_BY_NAME,
     GENRES,
+    NEO_HEADER_SIZE,
     NeoMeta,
     collect_pack_psm_roles_for_validation,
     detect_swap_p_needed,
@@ -29,6 +30,9 @@ from .core import (
     mame_zip_to_neo,
     pack_psm_role_from_basename,
     parse_neo,
+    parse_neo_header_metadata,
+    replace_neo_metadata,
+    write_bytes_atomic,
 )
 
 try:
@@ -150,6 +154,7 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         for tab, label in [
             (PackTab(nb),    "Pack (files → .neo)"),
             (ExtractTab(nb), "Extract (.neo → files)"),
+            (EditTab(nb),    "Edit (.neo)"),
             (InfoTab(nb),    "Info (.neo)"),
         ]:
             nb.add(tab, text=label)
@@ -915,6 +920,212 @@ class PackTab(ttk.Frame):
             self.after(0, finish)
 
         _run_in_thread(work)
+
+
+# ---------------------------------------------------------------------------
+# Edit tab
+# ---------------------------------------------------------------------------
+
+class EditTab(ttk.Frame):
+    """Rewrite .neo header metadata from form fields (ROM data unchanged)."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._is_running = False
+        self._cancel_event = threading.Event()
+        self._load_after_id: str | None = None
+        self._suppress_meta_fill = False
+        self._build()
+
+    def _build(self):
+        lw = _SECTION_LABEL_WIDTH
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(3, weight=1)
+
+        row = 0
+        files_frame = ttk.LabelFrame(self, text="File", padding=(8, 6))
+        files_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
+        files_frame.columnconfigure(0, weight=1)
+
+        self._neo = _FileRow(
+            files_frame,
+            "Input .neo:",
+            filetypes=[("NEO files", "*.neo"), ("All", "*.*")],
+            label_width=lw,
+        )
+        self._neo.grid(row=0, column=0, sticky="ew", pady=(0, 2))
+        self._neo.var.trace_add("write", lambda *_: self._schedule_meta_load())
+
+        self._out = _FileRow(
+            files_frame,
+            "Output .neo (optional):",
+            mode="save",
+            filetypes=[("NEO files", "*.neo"), ("All", "*.*")],
+            label_width=lw,
+        )
+        self._out.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        row += 1
+
+        meta_frame = ttk.LabelFrame(self, text="Metadata", padding=(8, 6))
+        meta_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=4)
+        meta_frame.columnconfigure(1, weight=1)
+        fields = [
+            ("Name:",         "name",       "Unknown"),
+            ("Manufacturer:", "mfr",        "Unknown"),
+            ("Year:",         "year",       "0"),
+            ("NGH #:",        "ngh",        "0"),
+            ("Screenshot #:", "screenshot", "0"),
+        ]
+        self._vars: dict[str, tk.StringVar] = {}
+        for i, (lbl, key, default) in enumerate(fields):
+            ttk.Label(meta_frame, text=lbl, width=lw, anchor="w").grid(
+                row=i, column=0, sticky="w", pady=2
+            )
+            v = tk.StringVar(value=default)
+            self._vars[key] = v
+            if key == "name":
+                _enforce_latin1_byte_limit(v, 32)
+            elif key == "mfr":
+                _enforce_latin1_byte_limit(v, 16)
+            ent_w = 11 if key in ("year", "ngh", "screenshot") else None
+            ent = ttk.Entry(
+                meta_frame,
+                textvariable=v,
+                width=(ent_w if ent_w else 24),
+            )
+            sticky = "w" if ent_w else "ew"
+            ent.grid(row=i, column=1, sticky=sticky, padx=4, pady=2)
+        gr = len(fields)
+        ttk.Label(meta_frame, text="Genre:", width=lw, anchor="w").grid(
+            row=gr, column=0, sticky="w", pady=2
+        )
+        self._genre = tk.StringVar(value="Other")
+        ttk.Combobox(
+            meta_frame,
+            textvariable=self._genre,
+            values=list(GENRES.values()),
+            state="readonly",
+            width=max(18, lw),
+        ).grid(row=gr, column=1, sticky="w", padx=4, pady=2)
+        row += 1
+
+        ctrl_row = ttk.Frame(self)
+        ctrl_row.grid(row=row, column=0, sticky="ew", padx=8, pady=3)
+        self._run_btn = ttk.Button(
+            ctrl_row, text="Write metadata", command=self._run
+        )
+        self._run_btn.grid(row=0, column=0, padx=(0, 8))
+        self._cancel_btn = ttk.Button(
+            ctrl_row, text="Cancel", command=self._request_cancel, state="disabled"
+        )
+        self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
+        self._busy = _BusySpinner(ctrl_row)
+        self._busy.grid(row=0, column=2, sticky="w")
+        ctrl_row.columnconfigure(3, weight=1)
+        row += 1
+
+        self._log = _LogBox(self, height=16)
+        self._log.grid(row=row, column=0, sticky="nsew", padx=8, pady=(4, 8))
+
+    def _schedule_meta_load(self, *_args) -> None:
+        if self._suppress_meta_fill:
+            return
+        if self._load_after_id is not None:
+            try:
+                self.after_cancel(self._load_after_id)
+            except tk.TclError:
+                pass
+        self._load_after_id = self.after(400, self._load_metadata_from_file)
+
+    def _load_metadata_from_file(self) -> None:
+        self._load_after_id = None
+        path = Path(self._neo.var.get().strip())
+        if not path.is_file():
+            return
+        try:
+            with path.open("rb") as f:
+                hdr = f.read(NEO_HEADER_SIZE)
+            meta = parse_neo_header_metadata(hdr)
+        except (OSError, ValueError):
+            return
+        self._suppress_meta_fill = True
+        try:
+            self._vars["name"].set(meta.name)
+            self._vars["mfr"].set(meta.manufacturer)
+            self._vars["year"].set(str(meta.year))
+            self._vars["ngh"].set(str(meta.ngh))
+            self._vars["screenshot"].set(str(meta.screenshot))
+            self._genre.set(GENRES.get(meta.genre) or "Other")
+        finally:
+            self._suppress_meta_fill = False
+
+    def _run(self) -> None:
+        if self._is_running:
+            return
+        inp = Path(self._neo.value)
+        if not inp.exists():
+            messagebox.showerror("Error", f"File not found: {inp}")
+            return
+        try:
+            year = int(self._vars["year"].get())
+            ngh = int(self._vars["ngh"].get())
+            screenshot = int(self._vars["screenshot"].get())
+        except ValueError:
+            messagebox.showerror(
+                "Error", "Year, NGH and Screenshot must be integers."
+            )
+            return
+        genre_id = GENRE_BY_NAME.get(self._genre.get().lower(), 0)
+        out_raw = self._out.value.strip()
+        dest = Path(out_raw) if out_raw else inp
+
+        self._log.clear()
+        self._is_running = True
+        self._run_btn.config(state="disabled")
+        self._cancel_btn.config(state="normal")
+        self._cancel_event.clear()
+        self._busy.start()
+
+        def work() -> None:
+            try:
+                if self._cancel_event.is_set():
+                    raise RuntimeError("Operation cancelled by user.")
+                self._log.append(f"Reading: {inp}")
+                data = inp.read_bytes()
+                if self._cancel_event.is_set():
+                    raise RuntimeError("Operation cancelled by user.")
+                new_data = replace_neo_metadata(
+                    data,
+                    name=self._vars["name"].get(),
+                    manufacturer=self._vars["mfr"].get(),
+                    year=year,
+                    genre=genre_id,
+                    ngh=ngh,
+                    screenshot=screenshot,
+                )
+                if self._cancel_event.is_set():
+                    raise RuntimeError("Operation cancelled by user.")
+                write_bytes_atomic(dest, new_data)
+                self._log.append(f"Written: {dest}")
+                rs = parse_neo(new_data)
+                self._log.append(rs.meta.format_info(rs))
+                self._log.append("[OK] Metadata updated.")
+            except Exception as e:
+                self._log.append(f"[ERROR] {e}")
+            finally:
+                self.after(0, self._finish_run)
+
+        _run_in_thread(work)
+
+    def _finish_run(self) -> None:
+        self._is_running = False
+        self._run_btn.config(state="normal")
+        self._cancel_btn.config(state="disabled")
+        self._busy.stop()
+
+    def _request_cancel(self) -> None:
+        self._cancel_event.set()
+        self._log.append("[WARN] Cancellation requested... waiting for safe stop.")
 
 
 # ---------------------------------------------------------------------------

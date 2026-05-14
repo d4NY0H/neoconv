@@ -21,6 +21,9 @@ Pack MAME zip to .neo:
 Pack directory to .neo:
     neoconv pack ./roms/ --prefix zin --name "Zintrick" --year 1996 \
         --manufacturer UPL --ngh 224 --genre Sports --out zintrick.neo
+
+Edit .neo metadata (no repack):
+    neoconv edit game.neo --name "New Title" --genre Fighting
 """
 
 from __future__ import annotations
@@ -44,6 +47,8 @@ from .core import (
     parse_mame_dir,
     parse_mame_zip,
     parse_neo,
+    replace_neo_metadata,
+    write_bytes_atomic,
 )
 
 
@@ -193,6 +198,49 @@ def cmd_detect_swap(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Subcommand: edit
+# ---------------------------------------------------------------------------
+
+def cmd_edit(args: argparse.Namespace) -> None:
+    """Rewrite .neo header fields without touching ROM payload."""
+    neo_path = Path(args.neo_file)
+    if not neo_path.exists():
+        print(f"Error: file not found: {neo_path}", file=sys.stderr)
+        sys.exit(1)
+
+    updates: dict = {}
+    if args.name is not None:
+        updates["name"] = args.name
+    if args.manufacturer is not None:
+        updates["manufacturer"] = args.manufacturer
+    if args.year is not None:
+        updates["year"] = args.year
+    if args.genre is not None:
+        updates["genre"] = _resolve_genre(args.genre)
+    if args.ngh is not None:
+        updates["ngh"] = args.ngh
+    if args.screenshot is not None:
+        updates["screenshot"] = args.screenshot
+
+    if not updates:
+        print(
+            "Error: specify at least one of --name, --manufacturer, --year, --genre, "
+            "--ngh, --screenshot.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    neo_data = neo_path.read_bytes()
+    new_data = replace_neo_metadata(neo_data, **updates)
+    out_path = Path(args.out) if args.out else neo_path
+
+    print(f"Editing: {neo_path}")
+    write_bytes_atomic(out_path, new_data)
+    print(f"Written: {out_path}")
+    _print_neo_info(new_data)
+
+
+# ---------------------------------------------------------------------------
 # Subcommand: info
 # ---------------------------------------------------------------------------
 
@@ -277,6 +325,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_detect.add_argument("input", help="Raw P-ROM file or MAME ZIP containing a *-p1.* file.")
     p_detect.set_defaults(func=cmd_detect_swap)
+
+    # -- edit --
+    p_edit = sub.add_parser(
+        "edit",
+        help="Rewrite .neo header metadata without repacking ROM data.",
+    )
+    p_edit.add_argument("neo_file", help="Input .neo file")
+    p_edit.add_argument(
+        "--out",
+        "-o",
+        default="",
+        help="Output .neo path (default: overwrite neo_file in place).",
+    )
+    p_edit.add_argument("--name", "-n", default=None, help="Game name")
+    p_edit.add_argument("--manufacturer", "-m", default=None, help="Manufacturer")
+    p_edit.add_argument("--year", "-y", type=int, default=None, help="Release year")
+    p_edit.add_argument(
+        "--genre",
+        "-g",
+        default=None,
+        metavar="NAME_OR_ID",
+        help=f"Genre name or id ({', '.join(GENRES.values())})",
+    )
+    p_edit.add_argument("--ngh", type=int, default=None, help="NGH number")
+    p_edit.add_argument("--screenshot", type=int, default=None, help="Screenshot number (TerraOnion)")
+    p_edit.set_defaults(func=cmd_edit)
 
     # -- info --
     p_info = sub.add_parser("info", help="Show metadata from a .neo file.")

@@ -28,6 +28,7 @@ Both interfaces support the same core workflows:
 |----------|-----|-----|
 | Extract `.neo` to MAME / Darksoft files | ✅ | ✅ |
 | Pack MAME ZIP or directory to `.neo` | ✅ | ✅ |
+| Edit `.neo` header metadata (no repack) | ✅ | ✅ |
 | View `.neo` metadata and region sizes | ✅ | ✅ |
 | P-ROM bank swap (auto-detect + manual override) | ✅ | ✅ |
 | Inspect P-ROM and report swap recommendation | ✅ | — |
@@ -138,8 +139,9 @@ Tabs:
 
 | Tab | Description |
 |-----|-------------|
-| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory, including C chip size selection |
 | **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap mode selectable via radio (`auto` / `yes` / `no`) |
+| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory, including C chip size selection |
+| **Edit (.neo)** | Load header fields from a `.neo`, adjust metadata, write back (optional separate output path) |
 | **Info** | Inspect metadata and ROM region sizes from a `.neo` file |
 
 ---
@@ -223,6 +225,28 @@ neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
 | `--diagnostic` | off | Warn on unrecognized filenames |
 
 Available genres: `Other`, `Action`, `BeatEmUp`, `Sports`, `Driving`, `Platformer`, `Mahjong`, `Shooter`, `Quiz`, `Fighting`, `Puzzle`
+
+### `edit` - change `.neo` header metadata (no repack)
+
+Updates TerraOnion header fields **without** touching P/S/M/V/C payload. At least one of the metadata flags below is required.
+
+```bash
+# Correct title in place (overwrites the file atomically)
+neoconv edit game.neo --name "Windjammers"
+
+# Multiple fields; write a new file (input unchanged)
+neoconv edit game.neo --genre Fighting --year 1994 --ngh 65 --out game_fixed.neo
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--out`, `-o` | *(overwrite input)* | Output `.neo` path |
+| `--name`, `-n` | — | Game name |
+| `--manufacturer`, `-m` | — | Manufacturer |
+| `--year`, `-y` | — | Release year |
+| `--genre`, `-g` | — | Genre name or numeric id (same set as `pack`) |
+| `--ngh` | — | NGH number |
+| `--screenshot` | — | TerraOnion screenshot index |
 
 ### `detect-swap` - inspect P-ROM swap requirement
 
