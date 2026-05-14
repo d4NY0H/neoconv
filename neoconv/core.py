@@ -73,6 +73,14 @@ C_BANK_SIZE = C_CHIP_SIZE_DEFAULT
 # ``fixed`` / text layer when there is no dedicated s1 (encrypted boards).
 _SYNTH_S_MAME_512K_SET_IDS = frozenset({253, 256, 257, 263, 266, 269, 271})
 
+# Synthetic S-ROM size heuristics (see _synthetic_zero_s_size_from_filenames).
+_RE_SYNTH_S_KF10_BOOTLEG = re.compile(r"^kf10[-_]", re.IGNORECASE)
+# Require ``c1r.`` / ``c2r.`` so stems like ``game-c1r2`` do not match ``c1r``.
+_RE_SYNTH_S_C1R_OR_C2R_CHIP = re.compile(
+    r"[-_]c1r\.(?:c1|bin)\b|[-_]c2r\.(?:c2|bin)\b",
+    re.IGNORECASE,
+)
+
 
 def swap_p_banks(p_rom: bytes) -> bytes:
     """
@@ -440,12 +448,16 @@ def _synthetic_zero_s_size_from_filenames(filenames: tuple[str, ...]) -> int:
     ``kf10`` bootleg, ``0x80000`` for PVC / SMA / CHAFIO parents (including
     sets that use ``NNN-c1.c1`` without ``c1r`` in the name), and ``0x20000``
     for typical CMC / earlier encrypted boards.
+
+    Matching uses filename regexes (not arbitrary substrings) so unrelated
+    names such as ``game-c1r2.bin`` do not trigger the ``c1r`` PVC branch.
     """
-    blob = " ".join(Path(p).name.lower() for p in filenames)
-    if "kf10-" in blob:
-        return 0x40000
-    if "c1r" in blob or "c2r" in blob:
-        return 0x80000
+    for p in filenames:
+        if _RE_SYNTH_S_KF10_BOOTLEG.match(Path(p).name):
+            return 0x40000
+    for p in filenames:
+        if _RE_SYNTH_S_C1R_OR_C2R_CHIP.search(Path(p).name):
+            return 0x80000
     for p in filenames:
         fn = Path(p).name.lower()
         for m in re.finditer(

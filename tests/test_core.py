@@ -469,6 +469,22 @@ class TestCoreEdgeCases:
         assert len(rs.s) == 0x20000
         assert rs.s == b"\x00" * 0x20000
 
+    def test_parse_mame_zip_synthetic_s_ignores_c1r_substring_false_positive(self, tmp_path):
+        """``game-c1r2.bin`` must not trigger the PVC ``c1r`` 512 KiB branch."""
+        z = tmp_path / "sam5ish_plus_junk.zip"
+        chip = make_rom(C_BANK_SIZE, 0x11)
+        with zipfile.ZipFile(z, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("270-p1.p1", make_rom(1024, 1))
+            zf.writestr("270-p2.sp2", make_rom(1024, 2))
+            zf.writestr("270-m1.m1", make_rom(1024, 3))
+            zf.writestr("270-v1.v1", make_rom(1024, 4))
+            zf.writestr("270-c1.c1", chip)
+            zf.writestr("270-c2.c2", make_rom(C_BANK_SIZE, 0x22))
+            zf.writestr("game-c1r2.bin", b"readme")
+        with pytest.warns(UserWarning, match="No text-layer ROM"):
+            rs = parse_mame_zip(z)
+        assert len(rs.s) == 0x20000
+
     def test_roles_to_romset_without_filenames_still_requires_physical_s(self):
         with pytest.raises(ValueError, match="S"):
             _roles_to_romset(
