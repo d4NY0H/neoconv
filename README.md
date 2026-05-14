@@ -2,7 +2,7 @@
 
 > A preservation-focused utility for converting between **TerraOnion `.neo` containers** and **MAME / Darksoft Neo Geo ROM sets**.
 
-`neoconv` handles C-ROM byte-interleaving, **P-ROM half-swap** (default: **auto-detect** from the M68000 vector table, with `yes` / `no` overrides), V-ROM chunking, and metadata. It is designed for commercial dumps, hacks, CD conversions, and homebrew.
+`neoconv` handles C-ROM byte-interleaving, **P-ROM half-swap** (default: **auto-detect** from the M68000 vector table, with `yes` / `no` overrides), V-ROM chunking, and metadata—including **in-place `.neo` header edits** without repacking ROM data. It is designed for commercial dumps, hacks, CD conversions, and homebrew.
 
 ---
 
