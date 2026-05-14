@@ -36,22 +36,22 @@ def extract_romset(
     output_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
 
-    def write(role: str, data: bytes, suffix: str = "") -> Path:
+    def _write_rom(role: str, data: bytes, suffix: str = "") -> Path:
         fname = f"{name_prefix}-{role}{suffix}{ext}"
         p = output_dir / fname
         p.write_bytes(data)
         written[role + suffix] = p
         return p
 
-    write("p1", romset.p)
-    write("s1", romset.s)
-    write("m1", romset.m)
+    _write_rom("p1", romset.p)
+    _write_rom("s1", romset.s)
+    _write_rom("m1", romset.m)
 
     for i, chunk in enumerate(romset.v_chunks(), start=1):
-        write("v", chunk, suffix=str(i))
+        _write_rom("v", chunk, suffix=str(i))
 
     for i, chip in enumerate(romset.c_chips(chip_size=c_chip_size), start=1):
-        write("c", chip, suffix=str(i))
+        _write_rom("c", chip, suffix=str(i))
 
     return written
 
