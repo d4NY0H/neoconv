@@ -39,9 +39,9 @@ Both interfaces support the same core workflows:
 ## Requirements
 
 - Python **3.9+**
-- For **GUI only**: Tk (`tkinter`)
+- **GUI**: Tk (`tkinter`) plus **tkinterdnd2** (declared dependency; drag-and-drop onto file path fields)
 
-CLI-only use remains pure Python stdlib (plus optional `pytest` for development tests).
+Conversion logic in **`neoconv.core`** uses only the Python standard library. For development, install **`pytest`** via `pip install -e ".[dev]"`.
 
 ---
 
@@ -117,9 +117,11 @@ python3 -m pytest tests/ -v
 python3 -m neoconv --version
 python3 -m neoconv --help
 python3 -c "import tkinter as tk; print('tkinter', tk.TkVersion)"
+python3 -c "import tkinterdnd2; print('tkinterdnd2 OK')"
 ```
 
-- If the last command fails, CLI still works, but GUI prerequisites are missing.
+- If the `tkinter` check fails, the CLI still works, but the GUI needs a Python build with Tk.
+- If the `tkinterdnd2` check fails, reinstall the package (`pip install .` or `pip install -e .`) so dependencies resolve.
 
 ---
 
@@ -133,7 +135,7 @@ neoconv-gui
 python3 -m neoconv.gui
 ```
 
-All file inputs support **drag and drop** — drop a `.neo` file or a MAME ZIP directly onto the relevant tab.
+Each **file path** row supports **drag-and-drop** onto its **text entry** (next to “Browse…”): drop a `.neo`, a MAME ZIP, or a **folder** where the UI expects a directory. This uses **tkinterdnd2**, which is installed with `pip install neoconv`. Some desktops (notably certain **Wayland** sessions) may not deliver drops into Tk apps; use **Browse…** if a drop does nothing.
 
 Tabs:
 

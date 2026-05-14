@@ -10,7 +10,9 @@ readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "d4NY0H" }]
 requires-python = ">=3.9"
-dependencies = []
+dependencies = [
+    "tkinterdnd2>=0.4.0",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
