@@ -117,3 +117,20 @@ def test_global_reset_calls_all_tabs_when_idle():
 
     app._reset_all_tabs()
     assert calls == ["reset", "reset"]
+
+
+def test_reset_all_tabs_removes_legacy_config(monkeypatch, tmp_path):
+    legacy = tmp_path / "config.json"
+    legacy.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(gui, "_legacy_neoconv_gui_config_path", lambda: legacy)
+
+    class IdleTab:
+        _is_running = False
+
+        def reset_defaults(self) -> None:
+            pass
+
+    app = gui.NeoConvApp.__new__(gui.NeoConvApp)
+    app._tabs = {"a": IdleTab()}
+    app._reset_all_tabs()
+    assert not legacy.exists()

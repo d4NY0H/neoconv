@@ -137,6 +137,15 @@ def _scan_required_roles(src: Path) -> set[str]:
     return collect_pack_psm_roles_for_validation(names)
 
 
+def _legacy_neoconv_gui_config_path() -> Path:
+    """Path where older neoconv GUI builds wrote ``config.json`` (no longer read)."""
+    if os.name == "nt":
+        return Path.home() / "AppData" / "Roaming" / "neoconv" / "config.json"
+    if os.name == "posix" and "darwin" in sys.platform:
+        return Path.home() / "Library" / "Application Support" / "neoconv" / "config.json"
+    return Path.home() / ".config" / "neoconv" / "config.json"
+
+
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
@@ -177,6 +186,10 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
         for tab in self._tabs.values():
             if hasattr(tab, "reset_defaults"):
                 tab.reset_defaults()
+        try:
+            _legacy_neoconv_gui_config_path().unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
