@@ -516,7 +516,7 @@ class TestNeoMetaFormatInfo:
         assert "Test Game" in info
         assert "SNK" in info
         assert "1994" in info
-        assert "0x002A" in info
+        assert "NGH          : 42" in info
         assert "Fighting" in info  # genre 9
         assert "Screenshot #" in info
         assert "123" in info
