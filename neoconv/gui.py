@@ -38,10 +38,19 @@ from .core import (
     write_bytes_atomic,
 )
 
+# Expected failures from core / I/O in background worker threads (narrow catch).
+_GUI_WORKER_HANDLED_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    ValueError,
+    RuntimeError,
+    zipfile.BadZipFile,
+    MemoryError,
+)
+
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD  # type: ignore
     _DND_AVAILABLE = True
-except Exception:
+except ImportError:
     DND_FILES = None
     TkinterDnD = None
     _DND_AVAILABLE = False
@@ -290,7 +299,7 @@ class _FileRow(ttk.Frame):
         try:
             self.entry.drop_target_register(DND_FILES)  # type: ignore[attr-defined]
             self.entry.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
-        except Exception:
+        except tk.TclError:
             # Drag-and-drop depends on TkDND availability at runtime.
             pass
 
@@ -299,7 +308,7 @@ class _FileRow(ttk.Frame):
             paths = self.tk.splitlist(event.data)
             if paths:
                 self.var.set(paths[0])
-        except Exception:
+        except (tk.TclError, ValueError, AttributeError):
             pass
 
 
@@ -577,8 +586,10 @@ class ExtractTab(ttk.Frame):
                         for info in zf.infolist():
                             self._wbridge.post_log(f"  {info.filename:<30} {info.file_size:>10,} bytes")
                 self._wbridge.post_log("[OK] Done.")
-            except Exception as e:
+            except _GUI_WORKER_HANDLED_ERRORS as e:
                 self._wbridge.post_log(f"[ERROR] {e}")
+            except Exception as e:
+                self._wbridge.post_log(f"[ERROR] Unexpected {type(e).__name__}: {e}")
             finally:
                 self._wbridge.post_call(self._finish_run)
 
@@ -873,8 +884,10 @@ class PackTab(ttk.Frame):
                 dest.write_bytes(neo_data)
                 self._wbridge.post_log(f"Written: {dest}  ({len(neo_data)/1024/1024:.2f} MB)")
                 self._wbridge.post_log("[OK] Done.")
-            except Exception as e:
+            except _GUI_WORKER_HANDLED_ERRORS as e:
                 self._wbridge.post_log(f"[ERROR] {e}")
+            except Exception as e:
+                self._wbridge.post_log(f"[ERROR] Unexpected {type(e).__name__}: {e}")
             finally:
                 self._wbridge.post_call(self._finish_run)
 
@@ -981,8 +994,10 @@ class PackTab(ttk.Frame):
             try:
                 roles = _scan_required_roles(src)
                 missing = [r for r in ("P", "S", "M") if r not in roles]
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 error = str(e)
+            except Exception as e:
+                error = f"Unexpected {type(e).__name__}: {e}"
 
             def finish() -> None:
                 if token != self._roles_scan_token or src_key != self._roles_src_key:
@@ -1189,8 +1204,10 @@ class EditTab(ttk.Frame):
                 rs = parse_neo(new_data)
                 self._wbridge.post_log(rs.meta.format_info(rs))
                 self._wbridge.post_log("[OK] Metadata updated.")
-            except Exception as e:
+            except _GUI_WORKER_HANDLED_ERRORS as e:
                 self._wbridge.post_log(f"[ERROR] {e}")
+            except Exception as e:
+                self._wbridge.post_log(f"[ERROR] Unexpected {type(e).__name__}: {e}")
             finally:
                 self._wbridge.post_call(self._finish_run)
 
@@ -1259,6 +1276,8 @@ class InfoTab(ttk.Frame):
             self._log.append(f"[ERROR] Invalid .neo file: {e}")
         except OSError as e:
             self._log.append(f"[ERROR] Could not read file: {e}")
+        except MemoryError as e:
+            self._log.append(f"[ERROR] {e}")
         except Exception as e:
             self._log.append(f"[ERROR] Unexpected error: {type(e).__name__}: {e}")
 
