@@ -693,17 +693,28 @@ def _interleave_c_chips(chips: list[bytes]) -> bytes:
 # .neo builder
 # ---------------------------------------------------------------------------
 
-def build_neo(romset: RomSet, meta: NeoMeta) -> bytes:
-    """Pack a RomSet into a .neo binary."""
+def _pack_neo_header(
+    p_size: int,
+    s_size: int,
+    m_size: int,
+    v_total: int,
+    c_size: int,
+    meta: NeoMeta,
+) -> bytes:
+    """
+    Serialise the 4096-byte TerraOnion header.
+
+    All V data is recorded in the V1 size field; V2 is always zero (same layout
+    as :func:`build_neo` output).
+    """
     header = bytearray(NEO_HEADER_SIZE)
     header[0:4] = NEO_MAGIC
-
-    struct.pack_into("<I", header, 0x04, len(romset.p))
-    struct.pack_into("<I", header, 0x08, len(romset.s))
-    struct.pack_into("<I", header, 0x0C, len(romset.m))
-    struct.pack_into("<I", header, 0x10, len(romset.v))
+    struct.pack_into("<I", header, 0x04, p_size)
+    struct.pack_into("<I", header, 0x08, s_size)
+    struct.pack_into("<I", header, 0x0C, m_size)
+    struct.pack_into("<I", header, 0x10, v_total)
     struct.pack_into("<I", header, 0x14, 0)  # V2 size (merged into V1)
-    struct.pack_into("<I", header, 0x18, len(romset.c))
+    struct.pack_into("<I", header, 0x18, c_size)
 
     struct.pack_into("<H", header, 0x1C, meta.year)
     struct.pack_into("<H", header, 0x1E, meta.genre)
@@ -716,7 +727,20 @@ def build_neo(romset: RomSet, meta: NeoMeta) -> bytes:
     mfr_b = meta.manufacturer.encode("latin-1", errors="replace")[:16]
     header[0x4D : 0x4D + len(mfr_b)] = mfr_b
 
-    return bytes(header) + romset.p + romset.s + romset.m + romset.v + romset.c
+    return bytes(header)
+
+
+def build_neo(romset: RomSet, meta: NeoMeta) -> bytes:
+    """Pack a RomSet into a .neo binary."""
+    hdr = _pack_neo_header(
+        len(romset.p),
+        len(romset.s),
+        len(romset.m),
+        len(romset.v),
+        len(romset.c),
+        meta,
+    )
+    return hdr + romset.p + romset.s + romset.m + romset.v + romset.c
 
 
 def replace_neo_metadata(
@@ -733,9 +757,32 @@ def replace_neo_metadata(
     Return a new .neo file with updated header metadata. ROM regions are unchanged.
 
     Parameters set to ``None`` are left unchanged from *neo_data*.
+
+    Only the 4096-byte header is rebuilt; ROM payload bytes are reused without
+    splitting the file into a :class:`RomSet` (avoids large temporary copies).
     """
-    rs = parse_neo(neo_data)
-    meta = rs.meta
+    if len(neo_data) < NEO_HEADER_SIZE:
+        raise ValueError("File too small to be a valid .neo container.")
+    if neo_data[:4] != NEO_MAGIC:
+        raise ValueError(
+            f"Not a valid .neo file (magic={neo_data[:4]!r}, expected {NEO_MAGIC!r})"
+        )
+
+    p_size = struct.unpack_from("<I", neo_data, 0x04)[0]
+    s_size = struct.unpack_from("<I", neo_data, 0x08)[0]
+    m_size = struct.unpack_from("<I", neo_data, 0x0C)[0]
+    v1_size = struct.unpack_from("<I", neo_data, 0x10)[0]
+    v2_size = struct.unpack_from("<I", neo_data, 0x14)[0]
+    c_size = struct.unpack_from("<I", neo_data, 0x18)[0]
+
+    expected = NEO_HEADER_SIZE + p_size + s_size + m_size + v1_size + v2_size + c_size
+    if len(neo_data) != expected:
+        raise ValueError(
+            f"File size mismatch: got {len(neo_data)}, expected {expected}. "
+            "The .neo file may be corrupt or truncated."
+        )
+
+    meta = _meta_from_neo_header_prefix(neo_data)
     if name is not None:
         meta.name = name
     if manufacturer is not None:
@@ -748,7 +795,10 @@ def replace_neo_metadata(
         meta.ngh = ngh
     if screenshot is not None:
         meta.screenshot = screenshot
-    return build_neo(rs, meta)
+
+    v_total = v1_size + v2_size
+    hdr = _pack_neo_header(p_size, s_size, m_size, v_total, c_size, meta)
+    return hdr + neo_data[NEO_HEADER_SIZE:]
 
 
 def write_bytes_atomic(path: Path | str, data: bytes) -> None:

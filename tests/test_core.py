@@ -312,6 +312,56 @@ class TestNeoMetadataEdit:
         assert m.ngh == 123
         assert m.name == old.meta.name
 
+    def test_replace_neo_metadata_bitwise_matches_build_neo_parse_path(self):
+        neo = make_neo(make_romset())
+        rs = parse_neo(neo)
+        ref_meta = NeoMeta(
+            name=rs.meta.name + "X",
+            manufacturer="OtherMfr",
+            year=rs.meta.year + 3,
+            genre=min(10, rs.meta.genre + 1),
+            screenshot=rs.meta.screenshot + 2,
+            ngh=rs.meta.ngh + 9,
+        )
+        ref = build_neo(rs, ref_meta)
+        new = replace_neo_metadata(
+            neo,
+            name=ref_meta.name,
+            manufacturer=ref_meta.manufacturer,
+            year=ref_meta.year,
+            genre=ref_meta.genre,
+            screenshot=ref_meta.screenshot,
+            ngh=ref_meta.ngh,
+        )
+        assert new == ref
+
+    def test_replace_neo_metadata_split_v_header_matches_build_neo(self):
+        """Rare V1/V2 split in header must match parse+build reference output."""
+        h = bytearray(NEO_HEADER_SIZE)
+        h[0:4] = NEO_MAGIC
+        struct.pack_into("<I", h, 0x04, 0)
+        struct.pack_into("<I", h, 0x08, 0)
+        struct.pack_into("<I", h, 0x0C, 0)
+        struct.pack_into("<I", h, 0x10, 3)
+        struct.pack_into("<I", h, 0x14, 2)
+        struct.pack_into("<I", h, 0x18, 0)
+        struct.pack_into("<H", h, 0x1C, 1999)
+        struct.pack_into("<H", h, 0x1E, 0)
+        struct.pack_into("<I", h, 0x20, 0)
+        struct.pack_into("<I", h, 0x24, 0)
+        neo = bytes(h) + b"AAA" + b"bb"
+        rs = parse_neo(neo)
+        meta2 = NeoMeta(
+            name=rs.meta.name,
+            manufacturer=rs.meta.manufacturer,
+            year=3333,
+            genre=rs.meta.genre,
+            screenshot=rs.meta.screenshot,
+            ngh=rs.meta.ngh,
+        )
+        ref = build_neo(rs, meta2)
+        assert replace_neo_metadata(neo, year=3333) == ref
+
     def test_write_bytes_atomic(self, tmp_path):
         p = tmp_path / "out.neo"
         write_bytes_atomic(p, b"alpha")
