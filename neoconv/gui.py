@@ -341,6 +341,41 @@ class _SizeCombo(ttk.Frame):
         return self.var.get()
 
 
+# Braille-pattern spinner (compact; works on macOS / most modern systems).
+_BUSY_SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+class _BusySpinner(ttk.Frame):
+    """Minimal busy indicator while a worker thread runs."""
+
+    def __init__(self, parent: tk.Misc, interval_ms: int = 80, **kw):
+        super().__init__(parent, **kw)
+        self._interval_ms = interval_ms
+        self._label = ttk.Label(self, text="", width=2, anchor="center")
+        self._label.pack()
+        self._after_id: str | None = None
+        self._frame = 0
+
+    def start(self) -> None:
+        self.stop()
+        self._frame = 0
+        self._tick()
+
+    def stop(self) -> None:
+        if self._after_id is not None:
+            try:
+                self.after_cancel(self._after_id)
+            except tk.TclError:
+                pass
+            self._after_id = None
+        self._label.configure(text="")
+
+    def _tick(self) -> None:
+        self._label.configure(text=_BUSY_SPINNER_FRAMES[self._frame])
+        self._frame = (self._frame + 1) % len(_BUSY_SPINNER_FRAMES)
+        self._after_id = self.after(self._interval_ms, self._tick)
+
+
 # ---------------------------------------------------------------------------
 # Extract tab
 # ---------------------------------------------------------------------------
@@ -461,8 +496,8 @@ class ExtractTab(ttk.Frame):
             ctrl_row, text="Cancel", command=self._request_cancel, state="disabled"
         )
         self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
-        self._progress = ttk.Progressbar(ctrl_row, mode="indeterminate", length=180)
-        self._progress.grid(row=0, column=2, sticky="w")
+        self._busy = _BusySpinner(ctrl_row)
+        self._busy.grid(row=0, column=2, sticky="w")
         ctrl_row.columnconfigure(3, weight=1)
         row += 1
 
@@ -490,7 +525,7 @@ class ExtractTab(ttk.Frame):
         self._run_btn.config(state="disabled")
         self._cancel_btn.config(state="normal")
         self._cancel_event.clear()
-        self._progress.start(10)
+        self._busy.start()
 
         def work():
             try:
@@ -534,7 +569,7 @@ class ExtractTab(ttk.Frame):
         self._is_running = False
         self._run_btn.config(state="normal")
         self._cancel_btn.config(state="disabled")
-        self._progress.stop()
+        self._busy.stop()
 
     def _request_cancel(self):
         self._cancel_event.set()
@@ -572,7 +607,7 @@ class ExtractTab(ttk.Frame):
         self._prefix.set("")
         self._fmt.set("mame")
         self._c_size.var.set("auto (C_total ÷ 2)")
-        self._progress.config(value=0)
+        self._busy.stop()
         self._toggle_out()
 
 
@@ -720,10 +755,8 @@ class PackTab(ttk.Frame):
             ctrl_row, text="Cancel", command=self._request_cancel, state="disabled"
         )
         self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
-        self._progress = ttk.Progressbar(
-            ctrl_row, mode="determinate", length=220, maximum=4, value=0
-        )
-        self._progress.grid(row=0, column=2, sticky="w")
+        self._busy = _BusySpinner(ctrl_row)
+        self._busy.grid(row=0, column=2, sticky="w")
         self._status_wrap = tk.Frame(ctrl_row, highlightthickness=0, bd=0)
         self._status_wrap.grid(row=0, column=3, sticky="nsew", padx=(10, 0))
         ctrl_row.columnconfigure(3, weight=1)
@@ -788,14 +821,13 @@ class PackTab(ttk.Frame):
         self._run_btn.config(state="disabled")
         self._cancel_btn.config(state="normal")
         self._cancel_event.clear()
-        self._progress.config(mode="determinate", maximum=4, value=0)
+        self._busy.start()
 
         def work():
             try:
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
                 self._log.append(f"Packing: {src}")
-                self.after(0, lambda: self._progress.config(value=1))
 
                 # Auto-swap: Diagnose ins Log (nicht nochmal auf stdout)
                 if swap_p == "auto":
@@ -830,7 +862,6 @@ class PackTab(ttk.Frame):
                         diagnostic=False,
                         swap_verbose=swap_verbose,
                     )
-                self.after(0, lambda: self._progress.config(value=2))
                 for warning_msg in captured:
                     msg = str(warning_msg.message)
                     self._log.append(f"[WARN] {msg}")
@@ -838,10 +869,8 @@ class PackTab(ttk.Frame):
                     raise RuntimeError("Operation cancelled by user.")
                 dest = out or src.with_suffix(".neo")
                 dest.write_bytes(neo_data)
-                self.after(0, lambda: self._progress.config(value=3))
                 self._log.append(f"Written: {dest}  ({len(neo_data)/1024/1024:.2f} MB)")
                 self._log.append("[OK] Done.")
-                self.after(0, lambda: self._progress.config(value=4))
             except Exception as e:
                 self._log.append(f"[ERROR] {e}")
             finally:
@@ -853,6 +882,7 @@ class PackTab(ttk.Frame):
         self._is_running = False
         self._run_btn.config(state="normal")
         self._cancel_btn.config(state="disabled")
+        self._busy.stop()
         self._schedule_validation()
 
     def _request_cancel(self):
@@ -1001,7 +1031,7 @@ class PackTab(ttk.Frame):
         self._genre.set("Other")
         self._swap_p.set("auto")
         self._diagnostic.set(False)
-        self._progress.config(value=0)
+        self._busy.stop()
         self._roles_src_key = None
         self._roles_missing = None
         self._roles_scan_error = None
@@ -1083,10 +1113,8 @@ class VerifyTab(ttk.Frame):
             ctrl_row, text="Cancel", command=self._request_cancel, state="disabled"
         )
         self._cancel_btn.grid(row=0, column=1, padx=(0, 8))
-        self._progress = ttk.Progressbar(
-            ctrl_row, mode="determinate", length=220, maximum=4, value=0
-        )
-        self._progress.grid(row=0, column=2, sticky="w")
+        self._busy = _BusySpinner(ctrl_row)
+        self._busy.grid(row=0, column=2, sticky="w")
         ctrl_row.columnconfigure(3, weight=1)
         row += 1
 
@@ -1107,7 +1135,7 @@ class VerifyTab(ttk.Frame):
         self._run_btn.config(state="disabled")
         self._cancel_btn.config(state="normal")
         self._cancel_event.clear()
-        self._progress.config(mode="determinate", maximum=4, value=0)
+        self._busy.start()
 
         def work():
             try:
@@ -1117,13 +1145,11 @@ class VerifyTab(ttk.Frame):
                 original_rs = parse_neo(original)
                 c_chip_size = _c_chip_size_from_str(self._c_size.value_str, len(original_rs.c))
                 self._log.append(f"Reading: {neo_path}")
-                self.after(0, lambda: self._progress.config(value=1))
                 self._log.append("Step 1: Extracting ROM data…")
                 zip_data = extract_romset_to_zip(original_rs, name_prefix=prefix,
                                                  fmt=fmt, c_chip_size=c_chip_size)
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
-                self.after(0, lambda: self._progress.config(value=2))
                 self._log.append("Step 2: Repacking to .neo…")
                 meta = original_rs.meta
                 with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tf:
@@ -1135,7 +1161,6 @@ class VerifyTab(ttk.Frame):
                     tmp_zip.unlink(missing_ok=True)
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
-                self.after(0, lambda: self._progress.config(value=3))
                 self._log.append("Step 3: Comparing ROM data regions...")
                 result = verify_roundtrip(original, rebuilt)
                 self._log.append("")
@@ -1145,7 +1170,6 @@ class VerifyTab(ttk.Frame):
                 self._log.append(f"  Rebuilt  ROM MD5 : {result.rebuilt_rom_md5}")
                 self._log.append(f"  File size match  : {result.file_size_match}")
                 self._log.append(f"  Details          : {result.details}")
-                self.after(0, lambda: self._progress.config(value=4))
             except Exception as e:
                 self._log.append(f"[ERROR] {e}")
             finally:
@@ -1157,6 +1181,7 @@ class VerifyTab(ttk.Frame):
         self._is_running = False
         self._run_btn.config(state="normal")
         self._cancel_btn.config(state="disabled")
+        self._busy.stop()
 
     def _request_cancel(self):
         self._cancel_event.set()
@@ -1184,7 +1209,7 @@ class VerifyTab(ttk.Frame):
         self._prefix.set("")
         self._fmt.set("mame")
         self._c_size.var.set("auto (C_total ÷ 2)")
-        self._progress.config(value=0)
+        self._busy.stop()
 
 
 # ---------------------------------------------------------------------------
