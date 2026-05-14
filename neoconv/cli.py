@@ -35,6 +35,7 @@ from pathlib import Path
 
 from . import __version__
 from .core import (
+    C_CHIP_SIZE_DEFAULT,
     GENRES,
     GENRE_BY_NAME,
     NeoMeta,
@@ -106,13 +107,11 @@ def cmd_extract(args: argparse.Namespace) -> None:
     fmt    = args.format  # 'mame' or 'darksoft'
 
     # c_chip_size: 0 means auto (C_total / 2 = one chip pair, maximum chip size)
-    from neoconv.core import C_CHIP_SIZE_DEFAULT
     if args.c_chip_size > 0:
         c_chip_size = args.c_chip_size
     else:
         # auto: derive from total C size — use full C/2 as one chip pair
-        from neoconv.core import parse_neo as _parse
-        _rs = _parse(neo_data)
+        _rs = parse_neo(neo_data)
         c_chip_size = len(_rs.c) // 2 if len(_rs.c) > 0 else C_CHIP_SIZE_DEFAULT
 
     if args.out_dir:
