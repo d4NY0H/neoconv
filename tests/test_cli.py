@@ -105,7 +105,7 @@ def test_cmd_extract_auto_c_chip_size(monkeypatch, tmp_path, capsys):
     neo = tmp_path / "game.neo"
     neo.write_bytes(b"fakedata")
     monkeypatch.setattr("neoconv.core.parse_neo", lambda _d: _RS())
-    monkeypatch.setattr(cli, "_print_neo_info", lambda *_: None)
+    monkeypatch.setattr(cli, "_print_neo_info", lambda _d: _RS())
     monkeypatch.setattr(cli, "extract_neo_to_zip", lambda *_a, **_kw: _mini_zip_bytes())
     out_zip = tmp_path / "out.zip"
     args = argparse.Namespace(
@@ -201,14 +201,10 @@ def test_cmd_pack_missing_input_exits(monkeypatch, tmp_path):
 
 
 def test_cmd_pack_unknown_genre_exits(monkeypatch, tmp_path):
-    roms = tmp_path / "roms"
-    roms.mkdir()
-    (roms / "a.bin").write_bytes(b"1")
-    monkeypatch.setattr(cli.sys, "exit", _exit_raiser)
-    monkeypatch.setattr(cli, "mame_dir_to_neo", lambda *_a, **_k: b"neo")
-    with pytest.raises(SystemExit) as exc:
-        cli.cmd_pack(_pack_namespace(roms, tmp_path / "o.neo", genre="__bad_genre__"))
-    assert exc.value.code == 1
+    # Genre validation now happens in argparse via _genre_type, not inside cmd_pack.
+    # Verify that _genre_type raises ArgumentTypeError for an unknown genre string.
+    with pytest.raises(argparse.ArgumentTypeError):
+        cli._genre_type("__bad_genre__")
 
 
 def test_cmd_detect_swap_from_zip(monkeypatch, tmp_path, capsys):
@@ -259,18 +255,14 @@ def test_resolve_genre_other_and_numeric():
     assert cli._resolve_genre(str(other_id)) == other_id
 
 
-def test_resolve_genre_unknown_string_exits(monkeypatch):
-    monkeypatch.setattr(cli.sys, "exit", _exit_raiser)
-    with pytest.raises(SystemExit) as exc:
+def test_resolve_genre_unknown_string_raises(monkeypatch):
+    with pytest.raises(ValueError, match="not_a_real_genre_label"):
         cli._resolve_genre("not_a_real_genre_label")
-    assert exc.value.code == 1
 
 
-def test_resolve_genre_numeric_not_in_genre_table_exits(monkeypatch):
-    monkeypatch.setattr(cli.sys, "exit", _exit_raiser)
-    with pytest.raises(SystemExit) as exc:
+def test_resolve_genre_numeric_not_in_genre_table_raises(monkeypatch):
+    with pytest.raises(ValueError, match="99999"):
         cli._resolve_genre("99999")
-    assert exc.value.code == 1
 
 
 def test_print_neo_info_uses_parse_neo(monkeypatch, capsys):
