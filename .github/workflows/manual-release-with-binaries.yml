@@ -123,6 +123,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip pyinstaller
           python -m pip install -e .
+          python -m pip install "tkinterdnd2>=0.4.0"
 
       - name: Create GUI entry-point script
         shell: python
@@ -134,11 +135,11 @@ jobs:
 
       - name: Build with PyInstaller (Windows / Linux)
         if: matrix.label != 'macos'
-        run: pyinstaller --onefile --windowed --name neoconv-gui _gui_entry.py
+        run: pyinstaller --onefile --windowed --collect-all tkinterdnd2 --name neoconv-gui _gui_entry.py
 
       - name: Build with PyInstaller (macOS — .app bundle)
         if: matrix.label == 'macos'
-        run: pyinstaller --windowed --name neoconv-gui _gui_entry.py
+        run: pyinstaller --windowed --collect-all tkinterdnd2 --name neoconv-gui _gui_entry.py
 
       - name: Package and rename (Windows)
         if: matrix.label == 'windows'
