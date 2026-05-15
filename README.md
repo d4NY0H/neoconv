@@ -365,7 +365,8 @@ For hacks and CD conversions, MAME `verifyroms` may report CRC mismatches becaus
 
 ### Planned
 
-- **Smarter `--c-chip-size auto` and `--v-bank-size` with full MAME coverage** (`extract` command and GUI): the current auto mode for C chips uses `c_total / 2` (correct for only 21.5% of games), and V-ROM is always split into fixed 2 MB chunks (correct for only 22.5% of games). The planned implementation uses M1 ROM fingerprinting to identify the game at extract time: the M1 block (audio CPU) is always stored as a single verbatim chip in both MAME and `.neo`, making its SHA1 a reliable game identifier. A generated lookup table (derived from the MAME Neo Geo software list) maps each M1 SHA1 to the exact C and V chip layouts for that game, achieving **100% coverage** of all 307 games in the MAME library with no user intervention. Manual override flags (`--c-chip-size`, `--v-bank-size`) will remain available for non-MAME or custom `.neo` files not present in the lookup table.
+- **`--c-chip-size` improvement** (`extract` command and GUI): the current auto mode derives chip size as `c_total / 2`, which is correct for games with exactly one C chip pair. Games with more than two chips (e.g. Neo Turf Masters with 4 MB chips) require `--c-chip-size` to be set manually. A smarter default may be added in a future release.
+- **`--v-bank-size` option** (`extract` command and GUI): V-ROM is currently always split into fixed 2 MB chunks (`V_BANK_SIZE`). Games with non-standard V chip sizes (e.g. 512 KB, 4 MB, 16 MB) require manual renaming after extraction. A `--v-bank-size` flag analogous to `--c-chip-size` is planned.
 - **Internal API cleanup**: helper functions `_apply_swap_p`, `_check_m68k_vectors`, `_interleave_c_chips`, `_name_to_role`, and `_roles_to_romset` are currently exported with a leading underscore despite being part of the semi-public API (used by tests and the GUI). The underscores will be removed in a future release.
 
 ---
