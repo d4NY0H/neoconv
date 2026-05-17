@@ -44,16 +44,17 @@ def test_scan_required_roles_for_zip(tmp_path):
     assert roles == {"P", "S", "M"}
 
 
-def test_c_chip_size_from_str_auto_uses_half_total():
-    label = gui._C_CHIP_SIZES[0][0]
-    assert gui._c_chip_size_from_str(label, c_total=2048) == 1024
-
-
-def test_c_chip_size_from_str_auto_without_c_total_uses_default():
+def test_c_chip_size_from_str_default_label():
     from neoconv.core import C_CHIP_SIZE_DEFAULT
 
     label = gui._C_CHIP_SIZES[0][0]
-    assert gui._c_chip_size_from_str(label, c_total=None) == C_CHIP_SIZE_DEFAULT
+    assert gui._c_chip_size_from_str(label) == C_CHIP_SIZE_DEFAULT
+
+
+def test_c_chip_size_from_str_4mb():
+    four_mb = 4 * 1024 * 1024
+    label = next(l for l, v in gui._C_CHIP_SIZES if v == four_mb)
+    assert gui._c_chip_size_from_str(label) == four_mb
 
 
 def test_c_chip_size_from_str_unknown_falls_back_to_default():

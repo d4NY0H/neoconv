@@ -100,15 +100,23 @@ def test_cmd_extract_out_dir_lists_files(monkeypatch, tmp_path, capsys):
     assert "game-p1.bin" in out
 
 
-def test_cmd_extract_auto_c_chip_size(monkeypatch, tmp_path, capsys):
+def test_cmd_extract_default_c_chip_size(monkeypatch, tmp_path, capsys):
+    from neoconv.core import C_CHIP_SIZE_DEFAULT
+
     class _RS:
-        c = b"abcd" * 2  # len 8 -> c_chip_size 4
+        c = b"abcd" * 2
 
     neo = tmp_path / "game.neo"
     neo.write_bytes(b"fakedata")
+    captured: dict = {}
+
+    def _capture(*_a, **kw):
+        captured.update(kw)
+        return _mini_zip_bytes()
+
     monkeypatch.setattr("neoconv.core.parse_neo", lambda _d: _RS())
     monkeypatch.setattr(cli, "_print_neo_info", lambda _d: _RS())
-    monkeypatch.setattr(cli, "extract_neo_to_zip", lambda *_a, **_kw: _mini_zip_bytes())
+    monkeypatch.setattr(cli, "extract_neo_to_zip", _capture)
     out_zip = tmp_path / "out.zip"
     args = argparse.Namespace(
         neo_file=str(neo),
@@ -121,6 +129,7 @@ def test_cmd_extract_auto_c_chip_size(monkeypatch, tmp_path, capsys):
     )
     cli.cmd_extract(args)
     assert out_zip.exists()
+    assert captured["c_chip_size"] == C_CHIP_SIZE_DEFAULT
 
 
 def test_cmd_extract_v_bank_size_passed_to_zip(monkeypatch, tmp_path, capsys):

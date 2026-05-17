@@ -126,14 +126,8 @@ def cmd_extract(args: argparse.Namespace) -> None:
     prefix = args.prefix or neo_path.stem
     fmt    = args.format  # 'mame' or 'darksoft'
 
-    # c_chip_size: 0 means auto (C_total / 2 = one chip pair, maximum chip size)
-    if args.c_chip_size > 0:
-        c_chip_size = args.c_chip_size
-    else:
-        # auto: derive from total C size — use full C/2 as one chip pair
-        c_chip_size = len(_rs.c) // 2 if len(_rs.c) > 0 else C_CHIP_SIZE_DEFAULT
-
-    # v_bank_size: 0 means default 2 MB (MAME standard)
+    # c_chip_size / v_bank_size: 0 means default 2 MB (MAME standard)
+    c_chip_size = args.c_chip_size if args.c_chip_size > 0 else C_CHIP_SIZE_DEFAULT
     v_bank_size = args.v_bank_size if args.v_bank_size > 0 else V_BANK_SIZE
     print(f"V bank size: {v_bank_size:,} bytes")
     print(f"C chip size: {c_chip_size:,} bytes")
@@ -313,9 +307,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_extract.add_argument(
         "--c-chip-size", type=int, default=0, metavar="BYTES",
         help=(
-            "Size of each C chip in bytes for de-interleaving (default: auto = C_total/2). "
-            "Use 2097152 (2 MB) for most games, 4194304 (4 MB) for games with larger chips "
-            "(e.g. Neo Turf Masters). Check the MAME ROM set for expected chip sizes."
+            "Size of each C chip in bytes for de-interleaving (default: 0 = 2097152 / 2 MB). "
+            "Use 4194304 (4 MB) for games with larger chips (e.g. Neo Turf Masters). "
+            "Chip size cannot be inferred from the .neo alone — check the MAME ROM set."
         )
     )
     p_extract.add_argument(

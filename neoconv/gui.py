@@ -62,10 +62,9 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 _C_CHIP_SIZES = [
-    ("auto (C_total ÷ 2)",  0),
+    ("2 MB (default)",     2 * 1024 * 1024),
     ("512 KB",               512 * 1024),
     ("1 MB",               1 * 1024 * 1024),
-    ("2 MB",               2 * 1024 * 1024),
     ("4 MB",               4 * 1024 * 1024),
     ("8 MB",               8 * 1024 * 1024),
     ("16 MB",             16 * 1024 * 1024),
@@ -149,12 +148,10 @@ class _GuiWorkerBridge:
             self._after_id = None
 
 
-def _c_chip_size_from_str(s: str, c_total: int | None = None) -> int:
+def _c_chip_size_from_str(s: str) -> int:
     for label, val in _C_CHIP_SIZES:
         if s == label:
-            if val == 0 and c_total is not None:
-                return c_total // 2 if c_total else C_CHIP_SIZE_DEFAULT
-            return val if val != 0 else C_CHIP_SIZE_DEFAULT
+            return val
     return C_CHIP_SIZE_DEFAULT
 
 
@@ -514,7 +511,7 @@ class ExtractTab(ttk.Frame):
             opt_frame,
             "C Chip Size:",
             _C_CHIP_SIZES,
-            "auto (C_total ÷ 2)",
+            "2 MB (default)",
             label_width=lw,
         )
         self._c_size.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
@@ -578,7 +575,7 @@ class ExtractTab(ttk.Frame):
                     raise RuntimeError("Operation cancelled by user.")
                 neo_data    = neo_path.read_bytes()
                 romset      = parse_neo(neo_data)
-                c_chip_size = _c_chip_size_from_str(self._c_size.value_str, len(romset.c))
+                c_chip_size = _c_chip_size_from_str(self._c_size.value_str)
                 v_bank_size = _v_bank_size_from_str(self._v_size.value_str)
                 self._wbridge.post_log(f"Reading: {neo_path}")
                 self._wbridge.post_log(f"C chip size: {c_chip_size:,} bytes")
