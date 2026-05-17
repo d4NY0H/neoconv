@@ -32,6 +32,7 @@ from .core import (
     detect_swap_p_needed,
     extract_romset,
     extract_romset_to_zip,
+    warn_overwriting_path,
     mame_dir_to_neo,
     mame_zip_to_neo,
     pack_psm_role_from_basename,
@@ -592,31 +593,42 @@ class ExtractTab(ttk.Frame):
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
 
+                extract_warnings: list[warnings.WarningMessage] = []
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    if mode == "dir":
+                        out_dir = Path(self._out_dir_var.get()) if self._out_dir_var.get() \
+                                  else neo_path.parent / neo_path.stem
+                        written = extract_romset(
+                            romset,
+                            out_dir,
+                            name_prefix=prefix,
+                            fmt=fmt,
+                            c_chip_size=c_chip_size,
+                            v_bank_size=v_bank_size,
+                        )
+                    else:
+                        dest = Path(self._out_zip.value) if self._out_zip.value \
+                               else neo_path.with_suffix(f".{fmt}.zip")
+                        warn_overwriting_path(dest)
+                        zip_data = extract_romset_to_zip(
+                            romset,
+                            name_prefix=prefix,
+                            fmt=fmt,
+                            c_chip_size=c_chip_size,
+                            v_bank_size=v_bank_size,
+                        )
+                        write_bytes_atomic(dest, zip_data)
+                        written = None
+                extract_warnings.extend(caught)
+                for wm in extract_warnings:
+                    self._wbridge.post_log(f"[WARN] {wm.message}")
+
                 if mode == "dir":
-                    out_dir = Path(self._out_dir_var.get()) if self._out_dir_var.get() \
-                              else neo_path.parent / neo_path.stem
-                    written = extract_romset(
-                        romset,
-                        out_dir,
-                        name_prefix=prefix,
-                        fmt=fmt,
-                        c_chip_size=c_chip_size,
-                        v_bank_size=v_bank_size,
-                    )
                     self._wbridge.post_log(f"Extracted {len(written)} files to: {out_dir}")
                     for _, p in sorted(written.items()):
                         self._wbridge.post_log(f"  {p.name:<30} {p.stat().st_size:>10,} bytes")
                 else:
-                    dest = Path(self._out_zip.value) if self._out_zip.value \
-                           else neo_path.with_suffix(f".{fmt}.zip")
-                    zip_data = extract_romset_to_zip(
-                        romset,
-                        name_prefix=prefix,
-                        fmt=fmt,
-                        c_chip_size=c_chip_size,
-                        v_bank_size=v_bank_size,
-                    )
-                    write_bytes_atomic(dest, zip_data)
                     self._wbridge.post_log(f"Written: {dest}  ({len(zip_data)/1024/1024:.2f} MB)")
                     with zipfile.ZipFile(dest) as zf:
                         for info in zf.infolist():

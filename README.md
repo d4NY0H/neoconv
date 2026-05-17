@@ -31,7 +31,7 @@ Both interfaces support the same core workflows:
 | Edit `.neo` header metadata (no repack) | ✅ | ✅ |
 | View `.neo` metadata and region sizes | ✅ | ✅ |
 | P-ROM bank swap (auto-detect + manual override) | ✅ | ✅ |
-| Inspect P-ROM and report swap recommendation | ✅ | — |
+| Standalone `detect-swap` (inspect P-ROM without packing) | ✅ | — *(Pack with **Auto-detect** logs the same check in the GUI)* |
 | Diagnostic mode for unrecognized files | ✅ | ✅ |
 
 ---
@@ -186,10 +186,12 @@ neoconv extract input.neo --prefix game --v-bank-size 4194304 --out game_v4m.zip
 |--------|---------|-------------|
 | `--prefix`, `-p` | *(input stem)* | Filename prefix for output files |
 | `--format`, `-f` | `mame` | Output format: `mame` (`.bin`) or `darksoft` (`.rom`) |
-| `--out`, `-o` | *(auto)* | Output ZIP path |
-| `--out-dir`, `-d` | — | Extract to directory instead of ZIP |
+| `--out`, `-o` | *(auto)* | Output ZIP path (ignored if `--out-dir` is set) |
+| `--out-dir`, `-d` | — | Extract to directory instead of ZIP; **wins over `--out`** when both are given |
 | `--c-chip-size` | `0` (2 MB) | Size of **each C chip** before interleaving (bytes). `0` = 2097152 (2 MB). **GUI presets:** 512 KB, 1 MB, 2 MB, 4 MB, 8 MB, 16 MB, 20 MB. **CLI:** any positive byte value. Not inferable from `.neo` alone — see [C-ROM interleaving](#c-rom-interleaving) |
 | `--v-bank-size` | `0` (2 MB) | Size of **each V output file** (`v1`, `v2`, …) in bytes. `0` = 2097152 (2 MB). **GUI presets:** 512 KB, 1 MB, 2 MB, 4 MB, 8 MB, 16 MB. **CLI:** any positive byte value. See [V-ROM chunking](#v-rom-chunking) |
+
+**Overwrite behaviour:** Existing output files are replaced without prompting. A **warning** is printed (CLI: stderr; GUI: log) for each path that already exists. Directory extract updates files in place; ZIP output is replaced atomically (see below).
 
 ### `pack` - ROM files -> `.neo`
 
@@ -237,14 +239,16 @@ neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
 | `--swap-p` | `auto` | P-ROM half-swap mode: `auto` (heuristic, default), `yes` (always), `no` (never) |
 | `--diagnostic` | off | Warn on unrecognized filenames |
 
+**Atomic output:** The output `.neo` is written via a temporary file in the same directory and then renamed, so an interrupted pack does not leave a truncated `.neo`.
+
 Available genres: `Other`, `Action`, `BeatEmUp`, `Sports`, `Driving`, `Platformer`, `Mahjong`, `Shooter`, `Quiz`, `Fighting`, `Puzzle`
 
 ### `edit` - change `.neo` header metadata (no repack)
 
-Updates TerraOnion header fields **without** touching P/S/M/V/C payload. At least one of the metadata flags below is required.
+Updates TerraOnion header fields **without** touching P/S/M/V/C payload. At least one of the metadata flags below is required. Like `pack` and extract-to-ZIP, writes use a temporary file and atomic rename when updating the output path.
 
 ```bash
-# Correct title in place (overwrites the file atomically)
+# Correct title in place (overwrites the input file atomically)
 neoconv edit game.neo --name "Windjammers"
 
 # Multiple fields; write a new file (input unchanged)

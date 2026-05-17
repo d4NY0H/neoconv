@@ -689,6 +689,13 @@ class TestExtractNeoToZip:
         for key in files_from_neo:
             assert files_from_neo[key].read_bytes() == files_from_rs[key].read_bytes()
 
+    def test_extract_romset_warns_when_overwriting(self, tmp_path):
+        rs = make_romset()
+        out_dir = tmp_path / "out"
+        extract_romset(rs, out_dir, name_prefix="g", fmt="mame")
+        with pytest.warns(UserWarning, match="Overwriting"):
+            extract_romset(rs, out_dir, name_prefix="g", fmt="mame")
+
 
 # ---------------------------------------------------------------------------
 # verify_roundtrip

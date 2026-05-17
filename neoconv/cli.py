@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import warnings
 import zipfile
 from pathlib import Path
 
@@ -51,6 +52,7 @@ from .core import (
     parse_mame_zip,
     parse_neo,
     replace_neo_metadata,
+    warn_overwriting_path,
     write_bytes_atomic,
 )
 
@@ -102,6 +104,11 @@ def _meta_from_args(args: argparse.Namespace) -> NeoMeta:
     )
 
 
+def _print_cli_warnings(caught: list[warnings.WarningMessage]) -> None:
+    for wm in caught:
+        print(f"Warning: {wm.message}", file=sys.stderr)
+
+
 def _print_neo_info(neo_data: bytes) -> RomSet:
     romset = parse_neo(neo_data)
     print(romset.meta.format_info(romset))
@@ -132,31 +139,42 @@ def cmd_extract(args: argparse.Namespace) -> None:
     print(f"V bank size: {v_bank_size:,} bytes")
     print(f"C chip size: {c_chip_size:,} bytes")
 
-    if args.out_dir:
-        out_dir = Path(args.out_dir)
-        written = extract_neo(
-            neo_data,
-            out_dir,
-            name_prefix=prefix,
-            fmt=fmt,
-            c_chip_size=c_chip_size,
-            v_bank_size=v_bank_size,
-        )
+    written: dict | None = None
+    out_path: Path | None = None
+    zip_data = b""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        if args.out_dir:
+            out_dir = Path(args.out_dir)
+            written = extract_neo(
+                neo_data,
+                out_dir,
+                name_prefix=prefix,
+                fmt=fmt,
+                c_chip_size=c_chip_size,
+                v_bank_size=v_bank_size,
+            )
+        else:
+            out_path = Path(args.out) if args.out else neo_path.with_suffix(
+                f".{'mame' if fmt == 'mame' else 'darksoft'}.zip"
+            )
+            warn_overwriting_path(out_path)
+            zip_data = extract_neo_to_zip(
+                neo_data,
+                name_prefix=prefix,
+                fmt=fmt,
+                c_chip_size=c_chip_size,
+                v_bank_size=v_bank_size,
+            )
+            write_bytes_atomic(out_path, zip_data)
+    _print_cli_warnings(caught)
+
+    if written is not None:
         print(f"Extracted {len(written)} files to: {out_dir}")
         for role, p in sorted(written.items()):
             print(f"  {p.name:<30} {p.stat().st_size:>10,} bytes")
     else:
-        out_path = Path(args.out) if args.out else neo_path.with_suffix(
-            f".{'mame' if fmt == 'mame' else 'darksoft'}.zip"
-        )
-        zip_data = extract_neo_to_zip(
-            neo_data,
-            name_prefix=prefix,
-            fmt=fmt,
-            c_chip_size=c_chip_size,
-            v_bank_size=v_bank_size,
-        )
-        write_bytes_atomic(out_path, zip_data)
+        assert out_path is not None
         print(f"Written: {out_path}  ({len(zip_data)/1024/1024:.2f} MB)")
         with zipfile.ZipFile(out_path) as zf:
             for info in zf.infolist():

@@ -58,6 +58,7 @@ from .extract import (
     extract_neo_to_zip,
     extract_romset,
     extract_romset_to_zip,
+    warn_overwriting_path,
     neo_to_darksoft_zip,
     neo_to_mame_zip,
 )
@@ -109,6 +110,7 @@ __all__ = [
     "extract_neo_to_zip",
     "extract_romset",
     "extract_romset_to_zip",
+    "warn_overwriting_path",
     "mame_dir_to_neo",
     "mame_zip_to_neo",
     "neo_to_darksoft_zip",

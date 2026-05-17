@@ -12,6 +12,16 @@ from .models import RomSet
 from .neo_format import parse_neo
 
 
+def warn_overwriting_path(path: Path, *, stacklevel: int = 3) -> None:
+    """Emit :class:`UserWarning` when *path* already exists (extract overwrite)."""
+    if path.exists():
+        warnings.warn(
+            f"Overwriting existing file: {path}",
+            UserWarning,
+            stacklevel=stacklevel,
+        )
+
+
 def _warn_v_bank_size_remainder(romset: RomSet, v_bank_size: int) -> None:
     v_len = len(romset.v)
     if v_len > 0 and v_len % v_bank_size != 0:
@@ -55,6 +65,7 @@ def extract_romset(
     def _write_rom(role: str, data: bytes, suffix: str = "") -> Path:
         fname = f"{name_prefix}-{role}{suffix}{ext}"
         p = output_dir / fname
+        warn_overwriting_path(p, stacklevel=5)
         p.write_bytes(data)
         written[role + suffix] = p
         return p
