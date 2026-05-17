@@ -20,10 +20,11 @@ from neoconv.core import (
     NeoMeta,
     RomSet,
     P_SWAP_SIZE,
-    _check_m68k_vectors,
-    _interleave_c_chips,
-    _name_to_role,
-    _roles_to_romset,
+    apply_swap_p,
+    check_m68k_vectors,
+    interleave_c_chips,
+    name_to_role,
+    roles_to_romset,
     build_neo,
     extract_neo_to_zip,
     extract_romset,
@@ -60,7 +61,7 @@ def make_romset(
     """Build a synthetic RomSet with distinguishable fill bytes per region."""
     c_chip = make_rom(C_BANK_SIZE, 0xCC)
     c_chips = [c_chip, make_rom(C_BANK_SIZE, 0xDD)] * c_pairs
-    c_interleaved = _interleave_c_chips(c_chips[:2])  # one bank for simplicity
+    c_interleaved = interleave_c_chips(c_chips[:2])  # one bank for simplicity
 
     return RomSet(
         p=make_rom(p_size, 0xAA),
@@ -78,43 +79,43 @@ def make_neo(romset: RomSet, meta: NeoMeta | None = None) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# _name_to_role
+# name_to_role
 # ---------------------------------------------------------------------------
 
 class TestNameToRole:
     def test_extension_based(self):
-        assert _name_to_role("054-p1.p1") == "P"
-        assert _name_to_role("054-s1.s1") == "S"
-        assert _name_to_role("054-m1.m1") == "M"
-        assert _name_to_role("054-v1.v1") == "V1"
-        assert _name_to_role("054-v4.v4") == "V4"
-        assert _name_to_role("054-c1.c1") == "C1"
-        assert _name_to_role("054-c2.c2") == "C2"
+        assert name_to_role("054-p1.p1") == "P"
+        assert name_to_role("054-s1.s1") == "S"
+        assert name_to_role("054-m1.m1") == "M"
+        assert name_to_role("054-v1.v1") == "V1"
+        assert name_to_role("054-v4.v4") == "V4"
+        assert name_to_role("054-c1.c1") == "C1"
+        assert name_to_role("054-c2.c2") == "C2"
 
     def test_bin_suffix(self):
-        assert _name_to_role("zin-p1.bin") == "P"
-        assert _name_to_role("zin-s1.bin") == "S"
-        assert _name_to_role("zin-m1.bin") == "M"
-        assert _name_to_role("zin-v2.bin") == "V2"
-        assert _name_to_role("zin-c1.bin") == "C1"
-        assert _name_to_role("zin-c2.bin") == "C2"
+        assert name_to_role("zin-p1.bin") == "P"
+        assert name_to_role("zin-s1.bin") == "S"
+        assert name_to_role("zin-m1.bin") == "M"
+        assert name_to_role("zin-v2.bin") == "V2"
+        assert name_to_role("zin-c1.bin") == "C1"
+        assert name_to_role("zin-c2.bin") == "C2"
 
     def test_rom_suffix(self):
-        assert _name_to_role("zin-p1.rom") == "P"
-        assert _name_to_role("zin-c4.rom") == "C4"
+        assert name_to_role("zin-p1.rom") == "P"
+        assert name_to_role("zin-c4.rom") == "C4"
 
     def test_unknown(self):
-        assert _name_to_role("neogeo.zip") is None
-        assert _name_to_role("000-lo.lo") is None
-        assert _name_to_role("sfix.sfix") is None
+        assert name_to_role("neogeo.zip") is None
+        assert name_to_role("000-lo.lo") is None
+        assert name_to_role("sfix.sfix") is None
 
     def test_case_insensitive(self):
-        assert _name_to_role("ZIN-P1.BIN") == "P"
-        assert _name_to_role("ZIN-C1.C1") == "C1"
+        assert name_to_role("ZIN-P1.BIN") == "P"
+        assert name_to_role("ZIN-C1.C1") == "C1"
 
     def test_encrypted_sprite_naming_c1r(self):
-        assert _name_to_role("269-c1r.c1") == "C1"
-        assert _name_to_role("269-c2r.c2") == "C2"
+        assert name_to_role("269-c1r.c1") == "C1"
+        assert name_to_role("269-c2r.c2") == "C2"
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +127,7 @@ class TestCRomInterleaving:
         """De-interleave then re-interleave must produce identical bytes."""
         c1 = make_rom(C_BANK_SIZE, 0x11)
         c2 = make_rom(C_BANK_SIZE, 0x22)
-        interleaved = _interleave_c_chips([c1, c2])
+        interleaved = interleave_c_chips([c1, c2])
 
         assert len(interleaved) == C_BANK_SIZE * 2
         # Even bytes = c1, odd bytes = c2
@@ -144,7 +145,7 @@ class TestCRomInterleaving:
         c2 = make_rom(C_BANK_SIZE, 0x22)
         c3 = make_rom(C_BANK_SIZE, 0x33)
         c4 = make_rom(C_BANK_SIZE, 0x44)
-        interleaved = _interleave_c_chips([c1, c2, c3, c4])
+        interleaved = interleave_c_chips([c1, c2, c3, c4])
 
         rs = RomSet(c=interleaved)
         chips = rs.c_chips(chip_size=C_BANK_SIZE)
@@ -155,7 +156,7 @@ class TestCRomInterleaving:
         large = 4 * 1024 * 1024
         c1 = make_rom(large, 0xAA)
         c2 = make_rom(large, 0xBB)
-        interleaved = _interleave_c_chips([c1, c2])
+        interleaved = interleave_c_chips([c1, c2])
         rs = RomSet(c=interleaved)
         chips = rs.c_chips(chip_size=large)
         assert chips == [c1, c2]
@@ -168,11 +169,11 @@ class TestCRomInterleaving:
 
     def test_size_mismatch_raises(self):
         with pytest.raises(ValueError, match="size mismatch"):
-            _interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE // 2)])
+            interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE // 2)])
 
     def test_odd_chip_count_raises(self):
         with pytest.raises(ValueError, match="[Oo]dd"):
-            _roles_to_romset({
+            roles_to_romset({
                 "P": make_rom(512 * 1024),
                 "S": make_rom(128 * 1024),
                 "M": make_rom(128 * 1024),
@@ -379,8 +380,8 @@ class TestNeoMetadataEdit:
 # ---------------------------------------------------------------------------
 
 class TestCoreEdgeCases:
-    def test_check_m68k_vectors_too_short(self):
-        ok, sp, rst = _check_m68k_vectors(b"\x00\x01\x02")
+    def testcheck_m68k_vectors_too_short(self):
+        ok, sp, rst = check_m68k_vectors(b"\x00\x01\x02")
         assert ok is False
         assert sp == 0 and rst == 0
 
@@ -497,9 +498,9 @@ class TestCoreEdgeCases:
             rs = parse_mame_zip(z)
         assert len(rs.s) == 0x20000
 
-    def test_roles_to_romset_without_filenames_still_requires_physical_s(self):
+    def testroles_to_romset_without_filenames_still_requires_physical_s(self):
         with pytest.raises(ValueError, match="S"):
-            _roles_to_romset(
+            roles_to_romset(
                 {
                     "P": b"x" * 4096,
                     "M": b"y" * 1024,
@@ -878,29 +879,29 @@ class TestDetectSwapP:
 
     def test_auto_swap_applies_when_needed(self):
         """mame_zip_to_neo with swap_p='auto' swaps only when needed."""
-        from neoconv.core import RomSet, NeoMeta, build_neo, _apply_swap_p
+        from neoconv.core import RomSet, NeoMeta, build_neo, apply_swap_p
         p_with_valid_second = _make_2mb_p_rom(valid_in_first=False)
         rs = RomSet(
             p=p_with_valid_second,
             s=make_rom(128 * 1024),
             m=make_rom(128 * 1024),
             v=make_rom(2 * 1024 * 1024),
-            c=_interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE)]),
+            c=interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE)]),
         )
-        rs_after = _apply_swap_p(rs, "auto", verbose=False)
+        rs_after = apply_swap_p(rs, "auto", verbose=False)
         HALF = P_SWAP_SIZE // 2
         # After auto-swap the first half must be the originally-second half
         assert rs_after.p[:HALF] == p_with_valid_second[HALF:]
 
     def test_auto_swap_no_op_when_not_needed(self):
-        from neoconv.core import RomSet, _apply_swap_p
+        from neoconv.core import RomSet, apply_swap_p
         p_with_valid_first = _make_2mb_p_rom(valid_in_first=True)
         rs = RomSet(
             p=p_with_valid_first,
             s=make_rom(128 * 1024),
             m=make_rom(128 * 1024),
             v=make_rom(2 * 1024 * 1024),
-            c=_interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE)]),
+            c=interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE)]),
         )
-        rs_after = _apply_swap_p(rs, "auto", verbose=False)
+        rs_after = apply_swap_p(rs, "auto", verbose=False)
         assert rs_after.p == p_with_valid_first  # unchanged

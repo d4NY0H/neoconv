@@ -53,7 +53,7 @@ def _word_swap(data: bytes) -> bytes:
     return bytes(b)
 
 
-def _check_m68k_vectors(half: bytes) -> tuple[bool, int, int]:
+def check_m68k_vectors(half: bytes) -> tuple[bool, int, int]:
     """
     Read the M68000 initial SP and Reset PC from the first 8 bytes of a
     P-ROM half (after word-swap from MAME storage format).
@@ -111,8 +111,8 @@ def detect_swap_p_needed(p_rom: bytes) -> tuple[bool, str]:
         )
 
     half = P_SWAP_SIZE // 2
-    v1_ok, sp1, rst1 = _check_m68k_vectors(p_rom[:half])
-    v2_ok, sp2, rst2 = _check_m68k_vectors(p_rom[half:])
+    v1_ok, sp1, rst1 = check_m68k_vectors(p_rom[:half])
+    v2_ok, sp2, rst2 = check_m68k_vectors(p_rom[half:])
 
     if v1_ok and not v2_ok:
         return False, (

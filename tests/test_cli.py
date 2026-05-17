@@ -286,11 +286,11 @@ def test_cmd_info_missing_file_exits(monkeypatch, tmp_path):
 
 
 def _mini_neo_bytes() -> bytes:
-    from neoconv.core import NeoMeta, RomSet, _interleave_c_chips, build_neo
+    from neoconv.core import NeoMeta, RomSet, build_neo, interleave_c_chips
 
     a = bytes([0x11]) * 256
     b = bytes([0x22]) * 256
-    c = _interleave_c_chips([a, b])
+    c = interleave_c_chips([a, b])
     rs = RomSet(
         p=bytes([0xAA]) * 512,
         s=bytes([0xBB]) * 64,

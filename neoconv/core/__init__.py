@@ -61,14 +61,14 @@ from .extract import (
     neo_to_darksoft_zip,
     neo_to_mame_zip,
 )
-from .interleave import _interleave_c_chips
+from .interleave import interleave_c_chips
 from .mame_parse import (
     collect_pack_psm_roles_for_validation,
+    name_to_role,
     pack_psm_role_from_basename,
     parse_mame_dir,
     parse_mame_zip,
-    _name_to_role,
-    _roles_to_romset,
+    roles_to_romset,
 )
 from .models import NeoMeta, RomSet
 from .neo_format import (
@@ -78,8 +78,8 @@ from .neo_format import (
     replace_neo_metadata,
     write_bytes_atomic,
 )
-from .pack import _apply_swap_p, mame_dir_to_neo, mame_zip_to_neo
-from .swap_detect import _check_m68k_vectors, detect_swap_p_needed, swap_p_banks
+from .pack import apply_swap_p, mame_dir_to_neo, mame_zip_to_neo
+from .swap_detect import check_m68k_vectors, detect_swap_p_needed, swap_p_banks
 from .verify import VerifyResult, verify_roundtrip
 
 __all__ = [
@@ -94,14 +94,13 @@ __all__ = [
     "NeoMeta",
     "RomSet",
     "VerifyResult",
-    "_apply_swap_p",
-    "_check_m68k_vectors",
-    "_interleave_c_chips",
-    "_name_to_role",
-    "_roles_to_romset",
+    "apply_swap_p",
     "build_neo",
+    "check_m68k_vectors",
     "collect_pack_psm_roles_for_validation",
     "detect_swap_p_needed",
+    "interleave_c_chips",
+    "name_to_role",
     "extract_neo",
     "extract_neo_to_zip",
     "extract_romset",
@@ -116,6 +115,7 @@ __all__ = [
     "parse_neo",
     "parse_neo_header_metadata",
     "replace_neo_metadata",
+    "roles_to_romset",
     "swap_p_banks",
     "verify_roundtrip",
     "write_bytes_atomic",

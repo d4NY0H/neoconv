@@ -11,7 +11,7 @@ from .neo_format import build_neo
 from .swap_detect import detect_swap_p_needed, swap_p_banks
 
 
-def _apply_swap_p(romset: RomSet, swap_p: bool | str, verbose: bool = True) -> RomSet:
+def apply_swap_p(romset: RomSet, swap_p: bool | str, verbose: bool = True) -> RomSet:
     """
     Apply P-ROM bank swap according to *swap_p*:
 
@@ -55,7 +55,7 @@ def mame_zip_to_neo(
         If True (default), print auto-detect diagnostics for ``swap_p="auto"``.
     """
     romset = parse_mame_zip(zip_path, diagnostic=diagnostic)
-    romset = _apply_swap_p(romset, swap_p, verbose=swap_verbose)
+    romset = apply_swap_p(romset, swap_p, verbose=swap_verbose)
     return build_neo(romset, meta)
 
 
@@ -79,5 +79,5 @@ def mame_dir_to_neo(
         If True (default), print auto-detect diagnostics for ``swap_p="auto"``.
     """
     romset = parse_mame_dir(dir_path, diagnostic=diagnostic)
-    romset = _apply_swap_p(romset, swap_p, verbose=swap_verbose)
+    romset = apply_swap_p(romset, swap_p, verbose=swap_verbose)
     return build_neo(romset, meta)

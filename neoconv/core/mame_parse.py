@@ -13,7 +13,7 @@ from .constants import (
     _RE_SYNTH_S_KF10_BOOTLEG,
     _SYNTH_S_MAME_512K_SET_IDS,
 )
-from .interleave import _interleave_c_chips
+from .interleave import interleave_c_chips
 from .models import RomSet
 
 
@@ -41,7 +41,7 @@ def pack_psm_role_from_basename(filename: str) -> Optional[str]:
     return None
 
 
-def _name_to_role(filename: str) -> Optional[str]:
+def name_to_role(filename: str) -> Optional[str]:
     """
     Map a filename inside a MAME zip to its ROM role.
     Returns 'P', 'S', 'M', 'V1'..'V8', 'C1'..'C16', or None.
@@ -106,11 +106,11 @@ def _filenames_imply_c1_sprite_rom(filenames: tuple[str, ...]) -> bool:
     True if the input looks like it includes a Neo Geo C1 sprite ROM.
 
     MAME uses several naming schemes (``253-c1.c1``, ``mart-c1.bin``,
-    ``kf10-c1a.bin``); :func:`_name_to_role` only covers the common forms.
+    ``kf10-c1a.bin``); :func:`name_to_role` only covers the common forms.
     """
     for p in filenames:
         n = Path(p).name
-        if _name_to_role(n) == "C1":
+        if name_to_role(n) == "C1":
             return True
         nl = n.lower()
         if re.search(r"[-_]c1[a-z0-9]*\.(?:c1|bin)\b", nl):
@@ -192,7 +192,7 @@ def _inject_synthetic_s_rom_if_needed(
     )
 
 
-def _roles_to_romset(
+def roles_to_romset(
     roles: dict[str, bytes],
     source: str = "",
     *,
@@ -274,7 +274,7 @@ def _roles_to_romset(
                 "The ROM data may be corrupt or incorrectly split."
             )
 
-    c_rom = _interleave_c_chips(c_chips_raw) if c_chips_raw else b""
+    c_rom = interleave_c_chips(c_chips_raw) if c_chips_raw else b""
     return RomSet(p=p_rom, s=s_rom, m=m_rom, v=v_rom, c=c_rom)
 
 
@@ -312,7 +312,7 @@ def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
                 if entry.is_dir():
                     continue
                 all_names.append(entry.filename)
-                role = _name_to_role(entry.filename)
+                role = name_to_role(entry.filename)
                 if role is not None:
                     _store_role_data(
                         roles, role, zf.read(entry.filename), entry.filename, diagnostic
@@ -330,7 +330,7 @@ def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
                 stacklevel=2,
             )
 
-    return _roles_to_romset(roles, source=str(zip_path), source_filenames=tuple(all_names))
+    return roles_to_romset(roles, source=str(zip_path), source_filenames=tuple(all_names))
 
 
 def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
@@ -353,7 +353,7 @@ def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
     for f in sorted(dir_path.iterdir()):
         if f.is_file():
             all_names.append(f.name)
-            role = _name_to_role(f.name)
+            role = name_to_role(f.name)
             if role is not None:
                 _store_role_data(roles, role, f.read_bytes(), f.name, diagnostic)
             else:
@@ -367,4 +367,4 @@ def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
                 stacklevel=2,
             )
 
-    return _roles_to_romset(roles, source=str(dir_path), source_filenames=tuple(all_names))
+    return roles_to_romset(roles, source=str(dir_path), source_filenames=tuple(all_names))

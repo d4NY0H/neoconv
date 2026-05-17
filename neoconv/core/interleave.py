@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-def _interleave_c_chips(chips: list[bytes]) -> bytes:
+def interleave_c_chips(chips: list[bytes]) -> bytes:
     """
     Interleave pairs of C chips into .neo format.
     chips = [c1, c2, c3, c4, ...]
