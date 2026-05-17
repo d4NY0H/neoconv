@@ -44,7 +44,13 @@ def pack_psm_role_from_basename(filename: str) -> Optional[str]:
 def _name_to_role(filename: str) -> Optional[str]:
     """
     Map a filename inside a MAME zip to its ROM role.
-    Returns 'P', 'S', 'M', 'V1'..'V8', 'C1'..'C8', or None.
+    Returns 'P', 'S', 'M', 'V1'..'V8', 'C1'..'C16', or None.
+
+    C chips C9-C16 are supported for extended ROM sets (e.g. hacks/homebrews
+    that exceed the standard 8-chip / 64 MB limit). The Neo Geo LSPC2 has a
+    20-bit sprite address space, allowing up to 128 MB of C ROM (16 chips at
+    8 MB each). No official SNK title uses more than C8, but the hardware
+    address space permits it.
     """
     fn = Path(filename).name.lower()
     ext = Path(fn).suffix.lstrip(".")
@@ -71,6 +77,14 @@ def _name_to_role(filename: str) -> Optional[str]:
         "c6": "C6",
         "c7": "C7",
         "c8": "C8",
+        "c9": "C9",
+        "c10": "C10",
+        "c11": "C11",
+        "c12": "C12",
+        "c13": "C13",
+        "c14": "C14",
+        "c15": "C15",
+        "c16": "C16",
     }
     if ext in ext_map:
         return ext_map[ext]
@@ -228,11 +242,11 @@ def _roles_to_romset(
             )
 
     c_chips_raw: list[bytes] = []
-    for i in range(1, 9):
+    for i in range(1, 17):
         chip = roles.get(f"C{i}", b"")
         if chip:
             c_chips_raw.append(chip)
-        elif any(roles.get(f"C{j}") for j in range(i + 1, 9)):
+        elif any(roles.get(f"C{j}") for j in range(i + 1, 17)):
             warnings.warn(
                 f"C{i} ROM missing but higher-numbered C chips are present "
                 f"(gap in C ROM sequence). This is likely a naming error. "
