@@ -607,7 +607,7 @@ class ExtractTab(ttk.Frame):
                         c_chip_size=c_chip_size,
                         v_bank_size=v_bank_size,
                     )
-                    dest.write_bytes(zip_data)
+                    write_bytes_atomic(dest, zip_data)
                     self._wbridge.post_log(f"Written: {dest}  ({len(zip_data)/1024/1024:.2f} MB)")
                     with zipfile.ZipFile(dest) as zf:
                         for info in zf.infolist():
@@ -908,7 +908,7 @@ class PackTab(ttk.Frame):
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
                 dest = out or src.with_suffix(".neo")
-                dest.write_bytes(neo_data)
+                write_bytes_atomic(dest, neo_data)
                 self._wbridge.post_log(f"Written: {dest}  ({len(neo_data)/1024/1024:.2f} MB)")
                 self._wbridge.post_log("[OK] Done.")
             except _GUI_WORKER_HANDLED_ERRORS as e:

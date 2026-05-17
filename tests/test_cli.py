@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from neoconv import cli
-from neoconv.core import parse_neo
+from neoconv.core import parse_neo, write_bytes_atomic as _write_bytes_atomic
 
 
 def _mini_zip_bytes() -> bytes:
@@ -54,6 +54,13 @@ def test_cmd_extract_writes_zip(monkeypatch, tmp_path, capsys):
     neo = tmp_path / "game.neo"
     neo.write_bytes(b"fakedata")
     out_zip = tmp_path / "out.zip"
+    atomic_calls: list[tuple[Path, bytes]] = []
+
+    def _atomic(path, data):
+        atomic_calls.append((Path(path), data))
+        _write_bytes_atomic(path, data)
+
+    monkeypatch.setattr(cli, "write_bytes_atomic", _atomic)
     monkeypatch.setattr(cli, "_print_neo_info", lambda *_: None)
     monkeypatch.setattr(cli, "extract_neo_to_zip", lambda *_a, **_kw: _mini_zip_bytes())
     args = argparse.Namespace(
@@ -66,6 +73,8 @@ def test_cmd_extract_writes_zip(monkeypatch, tmp_path, capsys):
         v_bank_size=0,
     )
     cli.cmd_extract(args)
+    assert len(atomic_calls) == 1
+    assert atomic_calls[0][0] == out_zip
     assert out_zip.exists()
     out = capsys.readouterr().out
     assert "Written:" in out
@@ -405,6 +414,21 @@ def test_build_parser_requires_subcommand():
     parser = cli.build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args([])
+
+
+def test_main_value_error_exits(monkeypatch, tmp_path, capsys):
+    roms = tmp_path / "roms"
+    roms.mkdir()
+    monkeypatch.setattr(
+        cli,
+        "mame_dir_to_neo",
+        lambda *_a, **_kw: (_ for _ in ()).throw(ValueError("pack failed")),
+    )
+    monkeypatch.setattr(cli.sys, "argv", ["neoconv", "pack", str(roms), "-o", str(tmp_path / "o.neo")])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    assert "pack failed" in capsys.readouterr().err
 
 
 def test_main_dispatches_info(monkeypatch, tmp_path, capsys):

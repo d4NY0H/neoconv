@@ -156,7 +156,7 @@ def cmd_extract(args: argparse.Namespace) -> None:
             c_chip_size=c_chip_size,
             v_bank_size=v_bank_size,
         )
-        out_path.write_bytes(zip_data)
+        write_bytes_atomic(out_path, zip_data)
         print(f"Written: {out_path}  ({len(zip_data)/1024/1024:.2f} MB)")
         with zipfile.ZipFile(out_path) as zf:
             for info in zf.infolist():
@@ -195,7 +195,7 @@ def cmd_pack(args: argparse.Namespace) -> None:
         print(f"Error: input must be a directory or ZIP file.", file=sys.stderr)
         sys.exit(1)
 
-    out_path.write_bytes(neo_data)
+    write_bytes_atomic(out_path, neo_data)
     print(f"Written: {out_path}")
     _print_neo_info(neo_data)
 
@@ -400,7 +400,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except (ValueError, OSError, zipfile.BadZipFile, MemoryError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

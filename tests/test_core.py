@@ -181,6 +181,28 @@ class TestCRomInterleaving:
                 # C2 intentionally missing
             })
 
+    def test_v_rom_gap_raises(self):
+        base = {
+            "P": make_rom(512 * 1024),
+            "S": make_rom(128 * 1024),
+            "M": make_rom(128 * 1024),
+        }
+        with pytest.raises(ValueError, match="gap in V ROM"):
+            roles_to_romset({**base, "V1": make_rom(128 * 1024), "V3": make_rom(128 * 1024)})
+
+    def test_c_rom_gap_raises(self):
+        base = {
+            "P": make_rom(512 * 1024),
+            "S": make_rom(128 * 1024),
+            "M": make_rom(128 * 1024),
+        }
+        with pytest.raises(ValueError, match="gap in C ROM"):
+            roles_to_romset({
+                **base,
+                "C1": make_rom(C_BANK_SIZE),
+                "C3": make_rom(C_BANK_SIZE),
+            })
+
 
 # ---------------------------------------------------------------------------
 # build_neo / parse_neo

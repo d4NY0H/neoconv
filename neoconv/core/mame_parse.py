@@ -233,12 +233,10 @@ def roles_to_romset(
         if chunk:
             v_rom += chunk
         elif any(roles.get(f"V{j}") for j in range(i + 1, 9)):
-            warnings.warn(
+            raise ValueError(
                 f"V{i} ROM missing but higher-numbered V chips are present "
                 f"(gap in V ROM sequence). This is likely a naming error. "
-                f"Expected e.g. game-v{i}.bin or game.v{i}.",
-                UserWarning,
-                stacklevel=3,
+                f"Expected e.g. game-v{i}.bin or game.v{i}."
             )
 
     c_chips_raw: list[bytes] = []
@@ -247,12 +245,10 @@ def roles_to_romset(
         if chip:
             c_chips_raw.append(chip)
         elif any(roles.get(f"C{j}") for j in range(i + 1, 17)):
-            warnings.warn(
+            raise ValueError(
                 f"C{i} ROM missing but higher-numbered C chips are present "
                 f"(gap in C ROM sequence). This is likely a naming error. "
-                f"Expected e.g. game-c{i}.bin or game.c{i}.",
-                UserWarning,
-                stacklevel=3,
+                f"Expected e.g. game-c{i}.bin or game.c{i}."
             )
 
     if c_chips_raw and len(c_chips_raw) % 2 != 0:
