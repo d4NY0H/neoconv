@@ -118,6 +118,49 @@ def _filenames_imply_c1_sprite_rom(filenames: tuple[str, ...]) -> bool:
     return False
 
 
+def iter_mame_dir_rom_files(dir_path: Path) -> list[Path]:
+    """
+    ROM files in *dir_path* and its immediate subdirectories (one level).
+
+    Covers the common layout after unzipping a MAME set into a folder.
+    """
+    files: list[Path] = []
+    for entry in sorted(dir_path.iterdir()):
+        if entry.is_file():
+            files.append(entry)
+        elif entry.is_dir():
+            for sub in sorted(entry.iterdir()):
+                if sub.is_file():
+                    files.append(sub)
+    return files
+
+
+def collect_pack_sequence_issues(filenames: Iterable[str]) -> list[str]:
+    """
+    Detect gaps in V1..V8 or C1..C16 numbering from input filenames.
+
+    Used for Pack preflight (GUI) before :func:`roles_to_romset` would raise.
+    """
+    found: set[str] = set()
+    for raw in filenames:
+        role = name_to_role(raw)
+        if role:
+            found.add(role)
+    issues: list[str] = []
+    for prefix, max_n in (("V", 8), ("C", 16)):
+        present = [i for i in range(1, max_n + 1) if f"{prefix}{i}" in found]
+        if not present:
+            continue
+        last = present[-1]
+        for i in range(1, last):
+            if f"{prefix}{i}" not in found:
+                issues.append(
+                    f"{prefix}{i} ROM missing but {prefix}{last} is present "
+                    "(gap in ROM sequence)"
+                )
+    return issues
+
+
 def collect_pack_psm_roles_for_validation(filenames: Iterable[str]) -> set[str]:
     """
     P/S/M roles satisfied for Pack validation, including boards with no s1 file.
@@ -340,20 +383,20 @@ def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
 
     Notes
     -----
-    Directory entries are processed in sorted path order so diagnostics and
-    ``source_filenames`` metadata are reproducible across platforms.
+    Files in the top-level directory and one level of subdirectories are
+    included (typical unzip layout). Entries are processed in sorted order so
+    diagnostics and ``source_filenames`` metadata are reproducible.
     """
     roles: dict[str, bytes] = {}
     ignored: list[str] = []
     all_names: list[str] = []
-    for f in sorted(dir_path.iterdir()):
-        if f.is_file():
-            all_names.append(f.name)
-            role = name_to_role(f.name)
-            if role is not None:
-                _store_role_data(roles, role, f.read_bytes(), f.name, diagnostic)
-            else:
-                ignored.append(f.name)
+    for f in iter_mame_dir_rom_files(dir_path):
+        all_names.append(f.name)
+        role = name_to_role(f.name)
+        if role is not None:
+            _store_role_data(roles, role, f.read_bytes(), f.name, diagnostic)
+        else:
+            ignored.append(f.name)
 
     if diagnostic and ignored:
         for fn in ignored:

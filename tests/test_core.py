@@ -552,6 +552,15 @@ class TestCoreEdgeCases:
         with pytest.warns(UserWarning, match=r"\[diagnostic\]"):
             parse_mame_dir(tmp_path, diagnostic=True)
 
+    def test_parse_mame_dir_reads_one_subdirectory_level(self, tmp_path):
+        sub = tmp_path / "set"
+        sub.mkdir()
+        (sub / "game-p1.bin").write_bytes(make_rom(512 * 1024))
+        (sub / "game-s1.bin").write_bytes(make_rom(128 * 1024))
+        (sub / "game-m1.bin").write_bytes(make_rom(128 * 1024))
+        rs = parse_mame_dir(tmp_path)
+        assert len(rs.p) == 512 * 1024
+
     def test_neo_to_mame_zip_and_darksoft_zip(self, tmp_path):
         rs = make_romset(p_size=65536)
         neo_path = tmp_path / "tiny.neo"
@@ -972,3 +981,25 @@ class TestDetectSwapP:
         )
         rs_after = apply_swap_p(rs, "auto", verbose=False)
         assert rs_after.p == p_with_valid_first  # unchanged
+
+    def test_auto_swap_inconclusive_emits_warning(self):
+        from neoconv.core import RomSet, apply_swap_p
+
+        rs = RomSet(p=make_rom(P_SWAP_SIZE, 0xFF))
+        with pytest.warns(UserWarning, match="inconclusive"):
+            apply_swap_p(rs, "auto", verbose=False)
+
+
+class TestPackPreflight:
+    def test_collect_pack_sequence_issues_v_gap(self):
+        from neoconv.core import collect_pack_sequence_issues
+
+        issues = collect_pack_sequence_issues(
+            ["game-v1.bin", "game-v3.bin", "game-p1.bin"]
+        )
+        assert any("V2" in m for m in issues)
+
+    def test_collect_pack_sequence_issues_clean(self):
+        from neoconv.core import collect_pack_sequence_issues
+
+        assert collect_pack_sequence_issues(["game-v1.bin", "game-v2.bin"]) == []

@@ -26,22 +26,35 @@ def test_name_to_required_role_matches_known_patterns():
     assert gui._name_to_required_role("other.txt") is None
 
 
-def test_scan_required_roles_for_directory(tmp_path):
+def test_scan_pack_preflight_for_directory(tmp_path):
     (tmp_path / "game-p1.bin").write_bytes(b"p")
     (tmp_path / "game-s1.bin").write_bytes(b"s")
     (tmp_path / "game-m1.bin").write_bytes(b"m")
-    roles = gui._scan_required_roles(tmp_path)
+    roles, issues = gui._scan_pack_preflight(tmp_path)
     assert roles == {"P", "S", "M"}
+    assert issues == []
 
 
-def test_scan_required_roles_for_zip(tmp_path):
+def test_scan_pack_preflight_for_zip(tmp_path):
     zip_path = tmp_path / "set.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("folder/game-p1.bin", b"p")
         zf.writestr("folder/game-s1.bin", b"s")
         zf.writestr("folder/game-m1.bin", b"m")
-    roles = gui._scan_required_roles(zip_path)
+    roles, issues = gui._scan_pack_preflight(zip_path)
     assert roles == {"P", "S", "M"}
+    assert issues == []
+
+
+def test_scan_pack_preflight_detects_v_gap(tmp_path):
+    (tmp_path / "game-p1.bin").write_bytes(b"p")
+    (tmp_path / "game-s1.bin").write_bytes(b"s")
+    (tmp_path / "game-m1.bin").write_bytes(b"m")
+    (tmp_path / "game-v1.bin").write_bytes(b"v")
+    (tmp_path / "game-v3.bin").write_bytes(b"v")
+    roles, issues = gui._scan_pack_preflight(tmp_path)
+    assert roles == {"P", "S", "M"}
+    assert any("V2" in i for i in issues)
 
 
 def test_c_chip_size_from_str_default_label():

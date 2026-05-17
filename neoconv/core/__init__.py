@@ -64,6 +64,8 @@ from .extract import (
 from .interleave import interleave_c_chips
 from .mame_parse import (
     collect_pack_psm_roles_for_validation,
+    collect_pack_sequence_issues,
+    iter_mame_dir_rom_files,
     name_to_role,
     pack_psm_role_from_basename,
     parse_mame_dir,
@@ -98,6 +100,8 @@ __all__ = [
     "build_neo",
     "check_m68k_vectors",
     "collect_pack_psm_roles_for_validation",
+    "collect_pack_sequence_issues",
+    "iter_mame_dir_rom_files",
     "detect_swap_p_needed",
     "interleave_c_chips",
     "name_to_role",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import replace
 from pathlib import Path
 
@@ -25,9 +26,24 @@ def apply_swap_p(romset: RomSet, swap_p: bool | str, verbose: bool = True) -> Ro
     """
     if swap_p == "auto":
         needed, reason = detect_swap_p_needed(romset.p)
+        inconclusive = "inconclusive" in reason.lower()
         if verbose:
-            tag = "auto-swap: YES —" if needed else "auto-swap: no  —"
-            print(f"  {tag} {reason}")
+            if inconclusive:
+                print(f"  [WARN] auto-swap inconclusive — {reason}")
+                print(
+                    "         Try: neoconv detect-swap <input>  "
+                    "or pack with --swap-p yes / no"
+                )
+            else:
+                tag = "auto-swap: YES —" if needed else "auto-swap: no  —"
+                print(f"  {tag} {reason}")
+        if inconclusive:
+            warnings.warn(
+                f"P-ROM swap detection inconclusive: {reason}. "
+                "Use neoconv detect-swap or set --swap-p yes/no.",
+                UserWarning,
+                stacklevel=2,
+            )
         if needed:
             return replace(romset, p=swap_p_banks(romset.p))
     elif swap_p:

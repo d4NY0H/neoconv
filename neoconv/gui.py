@@ -27,6 +27,8 @@ from .core import (
     NEO_HEADER_SIZE,
     NeoMeta,
     collect_pack_psm_roles_for_validation,
+    collect_pack_sequence_issues,
+    iter_mame_dir_rom_files,
     detect_swap_p_needed,
     extract_romset,
     extract_romset_to_zip,
@@ -204,15 +206,22 @@ def _name_to_required_role(filename: str) -> str | None:
     return pack_psm_role_from_basename(filename)
 
 
-def _scan_required_roles(src: Path) -> set[str]:
+def _list_pack_input_filenames(src: Path) -> list[str]:
     if src.is_dir():
-        names = [str(p) for p in src.iterdir() if p.is_file()]
-    elif zipfile.is_zipfile(src):
+        return [p.name for p in iter_mame_dir_rom_files(src)]
+    if zipfile.is_zipfile(src):
         with zipfile.ZipFile(src, "r") as zf:
-            names = [e.filename for e in zf.infolist() if not e.is_dir()]
-    else:
-        return set()
-    return collect_pack_psm_roles_for_validation(names)
+            return [e.filename for e in zf.infolist() if not e.is_dir()]
+    return []
+
+
+def _scan_pack_preflight(src: Path) -> tuple[set[str], list[str]]:
+    names = _list_pack_input_filenames(src)
+    if not names:
+        return set(), []
+    roles = collect_pack_psm_roles_for_validation(names)
+    issues = collect_pack_sequence_issues(names)
+    return roles, issues
 
 
 # ---------------------------------------------------------------------------
@@ -645,6 +654,7 @@ class PackTab(ttk.Frame):
         self._validate_after_id: str | None = None
         self._roles_src_key: tuple | None = None
         self._roles_missing: list[str] | None = None
+        self._roles_sequence_issues: list[str] | None = None
         self._roles_scan_error: str | None = None
         self._roles_scan_token = 0
         self._roles_scan_running_token: int | None = None
@@ -981,6 +991,7 @@ class PackTab(ttk.Frame):
         if src_key != self._roles_src_key:
             self._roles_src_key = src_key
             self._roles_missing = None
+            self._roles_sequence_issues = None
             self._roles_scan_error = None
             self._roles_scan_token += 1
             self._start_roles_scan(src, src_key, self._roles_scan_token)
@@ -1003,6 +1014,16 @@ class PackTab(ttk.Frame):
             )
             return
 
+        if self._roles_sequence_issues:
+            issue = self._roles_sequence_issues[0]
+            extra = (
+                f" (+{len(self._roles_sequence_issues) - 1} more)"
+                if len(self._roles_sequence_issues) > 1
+                else ""
+            )
+            self._set_status("warn", f"ROM sequence: {issue}{extra}")
+            return
+
         self._set_status("ok", "ready to pack")
 
     def _source_key(self, src: Path) -> tuple:
@@ -1017,9 +1038,10 @@ class PackTab(ttk.Frame):
 
         def work() -> None:
             missing: list[str] = []
+            sequence_issues: list[str] = []
             error: str | None = None
             try:
-                roles = _scan_required_roles(src)
+                roles, sequence_issues = _scan_pack_preflight(src)
                 missing = [r for r in ("P", "S", "M") if r not in roles]
             except (OSError, ValueError) as e:
                 error = str(e)
@@ -1032,6 +1054,7 @@ class PackTab(ttk.Frame):
                 self._roles_scan_running_token = None
                 self._roles_scan_error = error
                 self._roles_missing = None if error else missing
+                self._roles_sequence_issues = None if error else sequence_issues
                 self._schedule_validation()
 
             self._wbridge.post_call(finish)

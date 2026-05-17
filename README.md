@@ -300,7 +300,9 @@ The table below matches the primary rules in `name_to_role`: extension (e.g. `.p
 | **S ROM** | `.s1`, `-s1.bin`, `_s1.bin` |
 | **M ROM** | `.m1`, `-m1.bin`, `_m1.bin` |
 | **V ROMs** | `.v1`-`.v8`, `-v1.bin`-`-v8.bin`, `_v1.bin`-`_v8.bin` |
-| **C ROMs** | `.c1`-`.c8`, `-c1.bin`-`-c8.bin`, `_c1.bin`-`_c8.bin` |
+| **C ROMs** | `.c1`-`.c16`, `-c1.bin`-`-c16.bin`, `_c1.bin`-`_c16.bin` (C9–C16 for extended / hack sets) |
+
+**Pack directory layout:** `pack` reads ROM files in the chosen folder **and one level of subfolders** (typical after unzipping). **Gaps** in the V or C sequence (e.g. `v1` + `v3` without `v2`) cause pack to **abort** with an error instead of producing a broken `.neo`.
 
 Not every MAME filename variant is mapped here (for example some `*-c1a.bin`-style names are **not** assigned a **C** role by this table). Those files may still be listed in the archive and participate in **other** logic (see below).
 
@@ -336,6 +338,8 @@ Some Neo Geo titles and hacks store their 2 MB P-ROM with the two 1 MB halves in
 | `auto` (default) | Detect from vector table; prints a diagnostic line |
 | `yes` | Always swap — for titles where auto-detect is ambiguous |
 | `no` | Never swap — to opt out explicitly |
+
+When auto-detect is **inconclusive** (neither half has plausible M68k vectors), pack continues **without** swap but prints **`[WARN]`** and emits a warning — run `neoconv detect-swap <zip>` or set `--swap-p yes` / `no` explicitly.
 
 Use `neoconv detect-swap <zip>` to inspect a dump without packing it.
 
