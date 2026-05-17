@@ -69,11 +69,20 @@ class RomSet:
     c: bytes = b""  # all C data interleaved (as stored in .neo)
     meta: NeoMeta = field(default_factory=NeoMeta)
 
-    def v_chunks(self) -> list[bytes]:
-        """Split V data into V_BANK_SIZE (2 MB) chunks."""
+    def v_chunks(self, bank_size: int = V_BANK_SIZE) -> list[bytes]:
+        """
+        Split V data into fixed-size chunks (``v1``, ``v2``, …).
+
+        Parameters
+        ----------
+        bank_size : size of each V chunk in bytes (default 2 MB, MAME standard).
+                    Use 4 MB or other sizes when the MAME set uses larger V ROMs.
+        """
+        if bank_size <= 0:
+            raise ValueError(f"V bank size must be positive (got {bank_size}).")
         chunks = []
-        for i in range(0, len(self.v), V_BANK_SIZE):
-            chunks.append(self.v[i : i + V_BANK_SIZE])
+        for i in range(0, len(self.v), bank_size):
+            chunks.append(self.v[i : i + bank_size])
         return chunks
 
     def c_chips(self, chip_size: int = C_CHIP_SIZE_DEFAULT) -> list[bytes]:

@@ -62,6 +62,25 @@ def test_c_chip_size_from_str_unknown_falls_back_to_default():
     assert gui._c_chip_size_from_str("__no_such_label__") == C_CHIP_SIZE_DEFAULT
 
 
+def test_v_bank_size_from_str_default_label():
+    from neoconv.core import V_BANK_SIZE
+
+    label = gui._V_CHUNK_SIZES[0][0]
+    assert gui._v_bank_size_from_str(label) == V_BANK_SIZE
+
+
+def test_v_bank_size_from_str_4mb():
+    four_mb = 4 * 1024 * 1024
+    label = next(l for l, v in gui._V_CHUNK_SIZES if v == four_mb)
+    assert gui._v_bank_size_from_str(label) == four_mb
+
+
+def test_v_bank_size_from_str_unknown_falls_back_to_default():
+    from neoconv.core import V_BANK_SIZE
+
+    assert gui._v_bank_size_from_str("__no_such_label__") == V_BANK_SIZE
+
+
 def test_set_controls_state_toggles_widget():
     class _Stub:
         def __init__(self) -> None:

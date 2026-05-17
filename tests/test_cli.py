@@ -63,6 +63,7 @@ def test_cmd_extract_writes_zip(monkeypatch, tmp_path, capsys):
         out=str(out_zip),
         out_dir="",
         c_chip_size=2_097_152,
+        v_bank_size=0,
     )
     cli.cmd_extract(args)
     assert out_zip.exists()
@@ -91,6 +92,7 @@ def test_cmd_extract_out_dir_lists_files(monkeypatch, tmp_path, capsys):
         out="",
         out_dir=str(out_dir),
         c_chip_size=2_097_152,
+        v_bank_size=0,
     )
     cli.cmd_extract(args)
     out = capsys.readouterr().out
@@ -115,9 +117,36 @@ def test_cmd_extract_auto_c_chip_size(monkeypatch, tmp_path, capsys):
         out=str(out_zip),
         out_dir="",
         c_chip_size=0,
+        v_bank_size=0,
     )
     cli.cmd_extract(args)
     assert out_zip.exists()
+
+
+def test_cmd_extract_v_bank_size_passed_to_zip(monkeypatch, tmp_path, capsys):
+    neo = tmp_path / "game.neo"
+    neo.write_bytes(b"fakedata")
+    captured: dict = {}
+
+    def _capture(*_a, **kw):
+        captured.update(kw)
+        return _mini_zip_bytes()
+
+    monkeypatch.setattr(cli, "_print_neo_info", lambda *_: None)
+    monkeypatch.setattr(cli, "extract_neo_to_zip", _capture)
+    cli.cmd_extract(
+        argparse.Namespace(
+            neo_file=str(neo),
+            prefix="x",
+            format="mame",
+            out=str(tmp_path / "out.zip"),
+            out_dir="",
+            c_chip_size=2_097_152,
+            v_bank_size=4_194_304,
+        )
+    )
+    assert captured.get("v_bank_size") == 4_194_304
+    assert "V bank size: 4,194,304" in capsys.readouterr().out
 
 
 def test_cmd_extract_missing_file_exits(monkeypatch, tmp_path):
@@ -129,10 +158,17 @@ def test_cmd_extract_missing_file_exits(monkeypatch, tmp_path):
         out="",
         out_dir="",
         c_chip_size=2_097_152,
+        v_bank_size=0,
     )
     with pytest.raises(SystemExit) as exc:
         cli.cmd_extract(args)
     assert exc.value.code == 1
+
+
+def test_build_parser_extract_v_bank_size():
+    parser = cli.build_parser()
+    args = parser.parse_args(["extract", "game.neo", "--v-bank-size", "4194304"])
+    assert args.v_bank_size == 4_194_304
 
 
 def test_cmd_pack_from_directory(monkeypatch, tmp_path, capsys):

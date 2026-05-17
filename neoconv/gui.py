@@ -23,6 +23,7 @@ from .core import (
     C_CHIP_SIZE_DEFAULT,
     GENRE_BY_NAME,
     GENRES,
+    V_BANK_SIZE,
     NEO_HEADER_SIZE,
     NeoMeta,
     collect_pack_psm_roles_for_validation,
@@ -155,6 +156,13 @@ def _c_chip_size_from_str(s: str, c_total: int | None = None) -> int:
                 return c_total // 2 if c_total else C_CHIP_SIZE_DEFAULT
             return val if val != 0 else C_CHIP_SIZE_DEFAULT
     return C_CHIP_SIZE_DEFAULT
+
+
+def _v_bank_size_from_str(s: str) -> int:
+    for label, val in _V_CHUNK_SIZES:
+        if s == label:
+            return val
+    return V_BANK_SIZE
 
 
 def _set_controls_state(controls: list[tk.Widget], enabled: bool) -> None:
@@ -510,6 +518,15 @@ class ExtractTab(ttk.Frame):
             label_width=lw,
         )
         self._c_size.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+        self._v_size = _SizeCombo(
+            opt_frame,
+            "V Bank Size:",
+            _V_CHUNK_SIZES,
+            "2 MB (default)",
+            label_width=lw,
+        )
+        self._v_size.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
         row += 1
 
         ctrl_row = ttk.Frame(self)
@@ -562,24 +579,37 @@ class ExtractTab(ttk.Frame):
                 neo_data    = neo_path.read_bytes()
                 romset      = parse_neo(neo_data)
                 c_chip_size = _c_chip_size_from_str(self._c_size.value_str, len(romset.c))
+                v_bank_size = _v_bank_size_from_str(self._v_size.value_str)
                 self._wbridge.post_log(f"Reading: {neo_path}")
                 self._wbridge.post_log(f"C chip size: {c_chip_size:,} bytes")
+                self._wbridge.post_log(f"V bank size: {v_bank_size:,} bytes")
                 if self._cancel_event.is_set():
                     raise RuntimeError("Operation cancelled by user.")
 
                 if mode == "dir":
                     out_dir = Path(self._out_dir_var.get()) if self._out_dir_var.get() \
                               else neo_path.parent / neo_path.stem
-                    written = extract_romset(romset, out_dir, name_prefix=prefix,
-                                             fmt=fmt, c_chip_size=c_chip_size)
+                    written = extract_romset(
+                        romset,
+                        out_dir,
+                        name_prefix=prefix,
+                        fmt=fmt,
+                        c_chip_size=c_chip_size,
+                        v_bank_size=v_bank_size,
+                    )
                     self._wbridge.post_log(f"Extracted {len(written)} files to: {out_dir}")
                     for _, p in sorted(written.items()):
                         self._wbridge.post_log(f"  {p.name:<30} {p.stat().st_size:>10,} bytes")
                 else:
                     dest = Path(self._out_zip.value) if self._out_zip.value \
                            else neo_path.with_suffix(f".{fmt}.zip")
-                    zip_data = extract_romset_to_zip(romset, name_prefix=prefix,
-                                                     fmt=fmt, c_chip_size=c_chip_size)
+                    zip_data = extract_romset_to_zip(
+                        romset,
+                        name_prefix=prefix,
+                        fmt=fmt,
+                        c_chip_size=c_chip_size,
+                        v_bank_size=v_bank_size,
+                    )
                     dest.write_bytes(zip_data)
                     self._wbridge.post_log(f"Written: {dest}  ({len(zip_data)/1024/1024:.2f} MB)")
                     with zipfile.ZipFile(dest) as zf:

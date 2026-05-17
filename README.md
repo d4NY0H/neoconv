@@ -149,7 +149,7 @@ Tabs:
 | Tab | Description |
 |-----|-------------|
 | **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap mode selectable via radio (`auto` / `yes` / `no`) |
-| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory, including C chip size selection |
+| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory, including C chip and V bank size selection |
 | **Edit** | Load header fields from a `.neo`, adjust metadata, write back (optional separate output path) |
 | **Info** | Inspect metadata and ROM region sizes from a `.neo` file |
 
@@ -177,6 +177,9 @@ neoconv extract input.neo --prefix game --format mame --out-dir ./roms/
 
 # Explicit C chip size (example: 4 MB chips)
 neoconv extract input.neo --prefix game --c-chip-size 4194304 --out game_customc.zip
+
+# Explicit V bank size (example: 4 MB v1/v2 chunks)
+neoconv extract input.neo --prefix game --v-bank-size 4194304 --out game_v4m.zip
 ```
 
 | Option | Default | Description |
@@ -186,6 +189,7 @@ neoconv extract input.neo --prefix game --c-chip-size 4194304 --out game_customc
 | `--out`, `-o` | *(auto)* | Output ZIP path |
 | `--out-dir`, `-d` | — | Extract to directory instead of ZIP |
 | `--c-chip-size` | `0` (auto) | C chip size in bytes; `0` = auto (derives `C_total / 2`). Use `2097152` (2 MB) for most games, `4194304` (4 MB) for games with larger chips (e.g. Neo Turf Masters) |
+| `--v-bank-size` | `0` (2 MB) | V chunk size in bytes when splitting to `v1`, `v2`, …; `0` = 2097152 (2 MB). Use `4194304` (4 MB) or other sizes when the MAME set uses non-standard V ROMs |
 
 ### `pack` - ROM files -> `.neo`
 
@@ -329,7 +333,7 @@ Use `neoconv detect-swap <zip>` to inspect a dump without packing it.
 
 ### V-ROM chunking
 
-V-ROM data is contiguous in `.neo` and split to files on extract. Default chunk size is 2 MB (`v1`, `v2`, ...).
+V-ROM data is contiguous in `.neo` and split to `v1`, `v2`, … on extract. Default chunk size is **2 MB** (`--v-bank-size 0` or GUI **V Bank Size**). Choose another size (512 KB, 4 MB, 16 MB, …) when the MAME ROM set uses non-standard V chips. If total V size is not a multiple of the bank size, the last file is shorter and a warning is emitted.
 
 ### V1 / V2 header fields (read vs write)
 
@@ -366,7 +370,6 @@ For hacks and CD conversions, MAME `verifyroms` may report CRC mismatches becaus
 ### Planned
 
 - **`--c-chip-size` improvement** (`extract` command and GUI): the current auto mode derives chip size as `c_total / 2`, which is correct for games with exactly one C chip pair. Games with more than two chips (e.g. Neo Turf Masters with 4 MB chips) require `--c-chip-size` to be set manually. A smarter default may be added in a future release.
-- **`--v-bank-size` option** (`extract` command and GUI): V-ROM is currently always split into fixed 2 MB chunks (`V_BANK_SIZE`). Games with non-standard V chip sizes (e.g. 512 KB, 4 MB, 16 MB) require manual renaming after extraction. A `--v-bank-size` flag analogous to `--c-chip-size` is planned.
 
 ---
 

@@ -36,6 +36,7 @@ from pathlib import Path
 from . import __version__
 from .core import (
     C_CHIP_SIZE_DEFAULT,
+    V_BANK_SIZE,
     GENRES,
     GENRE_BY_NAME,
     NeoMeta,
@@ -132,10 +133,21 @@ def cmd_extract(args: argparse.Namespace) -> None:
         # auto: derive from total C size — use full C/2 as one chip pair
         c_chip_size = len(_rs.c) // 2 if len(_rs.c) > 0 else C_CHIP_SIZE_DEFAULT
 
+    # v_bank_size: 0 means default 2 MB (MAME standard)
+    v_bank_size = args.v_bank_size if args.v_bank_size > 0 else V_BANK_SIZE
+    print(f"V bank size: {v_bank_size:,} bytes")
+    print(f"C chip size: {c_chip_size:,} bytes")
+
     if args.out_dir:
         out_dir = Path(args.out_dir)
-        written = extract_neo(neo_data, out_dir, name_prefix=prefix, fmt=fmt,
-                              c_chip_size=c_chip_size)
+        written = extract_neo(
+            neo_data,
+            out_dir,
+            name_prefix=prefix,
+            fmt=fmt,
+            c_chip_size=c_chip_size,
+            v_bank_size=v_bank_size,
+        )
         print(f"Extracted {len(written)} files to: {out_dir}")
         for role, p in sorted(written.items()):
             print(f"  {p.name:<30} {p.stat().st_size:>10,} bytes")
@@ -143,8 +155,13 @@ def cmd_extract(args: argparse.Namespace) -> None:
         out_path = Path(args.out) if args.out else neo_path.with_suffix(
             f".{'mame' if fmt == 'mame' else 'darksoft'}.zip"
         )
-        zip_data = extract_neo_to_zip(neo_data, name_prefix=prefix, fmt=fmt,
-                                      c_chip_size=c_chip_size)
+        zip_data = extract_neo_to_zip(
+            neo_data,
+            name_prefix=prefix,
+            fmt=fmt,
+            c_chip_size=c_chip_size,
+            v_bank_size=v_bank_size,
+        )
         out_path.write_bytes(zip_data)
         print(f"Written: {out_path}  ({len(zip_data)/1024/1024:.2f} MB)")
         with zipfile.ZipFile(out_path) as zf:
@@ -300,6 +317,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Use 2097152 (2 MB) for most games, 4194304 (4 MB) for games with larger chips "
             "(e.g. Neo Turf Masters). Check the MAME ROM set for expected chip sizes."
         )
+    )
+    p_extract.add_argument(
+        "--v-bank-size", type=int, default=0, metavar="BYTES",
+        help=(
+            "Size of each V ROM chunk in bytes when splitting to v1, v2, ... "
+            "(default: 0 = 2097152 / 2 MB). Use 4194304 (4 MB) or other sizes when "
+            "the MAME set uses non-standard V chips."
+        ),
     )
     p_extract.set_defaults(func=cmd_extract)
 

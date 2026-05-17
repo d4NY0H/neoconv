@@ -543,6 +543,51 @@ class TestCoreEdgeCases:
 
 
 # ---------------------------------------------------------------------------
+# V ROM chunking
+# ---------------------------------------------------------------------------
+
+class TestVRomChunking:
+    def test_v_chunks_default_2mb(self):
+        two_mb = 2 * 1024 * 1024
+        rs = RomSet(v=make_rom(8 * 1024 * 1024, 0xDD))
+        chunks = rs.v_chunks()
+        assert len(chunks) == 4
+        assert all(len(c) == two_mb for c in chunks)
+
+    def test_v_chunks_custom_bank_size(self):
+        four_mb = 4 * 1024 * 1024
+        rs = RomSet(v=make_rom(8 * 1024 * 1024, 0xDD))
+        chunks = rs.v_chunks(bank_size=four_mb)
+        assert len(chunks) == 2
+        assert all(len(c) == four_mb for c in chunks)
+
+    def test_v_chunks_invalid_bank_size_raises(self):
+        with pytest.raises(ValueError, match="positive"):
+            RomSet(v=b"x").v_chunks(bank_size=0)
+
+    def test_extract_zip_uses_v_bank_size(self):
+        four_mb = 4 * 1024 * 1024
+        rs = make_romset(v_size=8 * 1024 * 1024)
+        zip_bytes = extract_romset_to_zip(
+            rs, name_prefix="x", fmt="mame", v_bank_size=four_mb
+        )
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            names = zf.namelist()
+        assert "x-v1.bin" in names
+        assert "x-v2.bin" in names
+        assert "x-v3.bin" not in names
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            assert len(zf.read("x-v1.bin")) == four_mb
+            assert len(zf.read("x-v2.bin")) == four_mb
+
+    def test_warn_when_v_not_multiple_of_bank_size(self):
+        two_mb = 2 * 1024 * 1024
+        rs = RomSet(v=b"\x00" * (two_mb + 512))
+        with pytest.warns(UserWarning, match="not a multiple"):
+            extract_romset_to_zip(rs, name_prefix="x", fmt="mame", v_bank_size=two_mb)
+
+
+# ---------------------------------------------------------------------------
 # extract_neo_to_zip
 # ---------------------------------------------------------------------------
 
