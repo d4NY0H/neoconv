@@ -1,8 +1,8 @@
 # neoconv
 
-> A preservation-focused utility to **convert** between **TerraOnion `.neo` containers** and **MAME / Darksoft Neo Geo ROM sets**, and to **edit `.neo` header metadata** (name, manufacturer, year, genre, NGH, screenshot index) **without repacking** ROM data.
+> A preservation-focused **CLI and GUI** tool to **convert** between **TerraOnion `.neo` containers** and **MAME / Darksoft Neo Geo ROM sets**, and to **edit `.neo` header metadata** (name, manufacturer, year, genre, NGH, screenshot index) **without repacking** ROM data.
 
-`neoconv` **packs** directories or MAME ZIPs into `.neo`, **extracts** `.neo` back to ROM files, and **rewrites** `.neo` headers when you only need metadata changes. It handles C-ROM byte-interleaving, **P-ROM half-swap** (default: **auto-detect** from the M68000 vector table, with `yes` / `no` overrides), V-ROM chunking, and TerraOnion header fields. It is designed for commercial dumps, hacks, CD conversions, and homebrew.
+Use **`neoconv`** on the command line or via **`neoconv-gui`** (same core engine). It **packs** MAME ZIPs or ROM folders into `.neo`, **extracts** `.neo` back to individual ROM files, and **rewrites** headers when only metadata needs to change. It handles C-ROM byte-interleaving, **P-ROM half-swap** (default: **auto-detect** from the M68000 vector table, with `yes` / `no` overrides), V-ROM chunking, and TerraOnion header fields — for commercial dumps, hacks, CD conversions, and homebrew.
 
 ---
 
