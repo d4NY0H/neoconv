@@ -15,7 +15,7 @@ Most Neo Geo tools only handle one direction or break on non-standard sets. `neo
 | **Reliable** | Deterministic conversions with automated tests for core roundtrip behaviour |
 | **Universal** | Handles commercial sets, hacks, CD conversions, and homebrew |
 | **Transparent** | C interleaving, P-ROM swap (auto or manual), and V chunking are explicit and documented |
-| **Configurable** | Selectable C chip size per title (2 MB default, 4 MB for some games) |
+| **Configurable** | On **extract**: `--c-chip-size` and `--v-bank-size` in bytes. **neoconv** falls back to **2 MB** (`2097152`) when unset; the correct value per game comes from the MAME ROM set (e.g. 4 MB / `4194304` C chips for Neo Turf Masters), not from the `.neo` header alone |
 | **Dual interface** | CLI and GUI expose the same core workflows |
 
 ---
