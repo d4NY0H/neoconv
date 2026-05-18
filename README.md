@@ -163,7 +163,11 @@ neoconv <command> [options]
 python3 -m neoconv <command> [options]
 ```
 
-### `extract` - `.neo` -> ROM files
+Commands: **`extract`**, **`pack`**, **`edit`**, **`detect-swap`**, **`info`**.
+
+---
+
+### `extract` — `.neo` → ROM files
 
 ```bash
 # MAME ZIP
@@ -191,9 +195,11 @@ neoconv extract input.neo --prefix game --v-bank-size 4194304 --out game_v4m.zip
 | `--c-chip-size` | `0` (= `2097152`) | Size of **each C chip** in **bytes** before interleaving. `0` = 2 MB. GUI presets match [common sizes](#common-extract-sizes-cli-bytes). **CLI:** any positive byte value. See [C-ROM interleaving](#c-rom-interleaving) |
 | `--v-bank-size` | `0` (= `2097152`) | Size of **each V file** (`v1`, `v2`, …) in **bytes**. `0` = 2 MB. GUI presets match [common sizes](#common-extract-sizes-cli-bytes). See [V-ROM chunking](#v-rom-chunking) |
 
-**Overwrite behaviour:** Existing output files are replaced without prompting. A **warning** is printed (CLI: stderr; GUI: log) for each path that already exists. Directory extract updates files in place; ZIP output is replaced atomically (see below).
+**Overwrite behaviour:** Existing output files are replaced without prompting. A **warning** is printed (CLI: stderr; GUI: log) for each path that already exists. Directory extract updates files in place; ZIP output is replaced atomically (see [Atomic file writes](#atomic-file-writes)).
 
-### `pack` - ROM files -> `.neo`
+---
+
+### `pack` — ROM files → `.neo`
 
 ```bash
 # From MAME ZIP
@@ -239,13 +245,15 @@ neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
 | `--swap-p` | `auto` | P-ROM half-swap mode: `auto` (heuristic, default), `yes` (always), `no` (never) |
 | `--diagnostic` | off | Warn on unrecognized filenames |
 
-**Atomic output:** The output `.neo` is written via a temporary file in the same directory and then renamed, so an interrupted pack does not leave a truncated `.neo`.
+**Available genres:** `Other`, `Action`, `BeatEmUp`, `Sports`, `Driving`, `Platformer`, `Mahjong`, `Shooter`, `Quiz`, `Fighting`, `Puzzle`
 
-Available genres: `Other`, `Action`, `BeatEmUp`, `Sports`, `Driving`, `Platformer`, `Mahjong`, `Shooter`, `Quiz`, `Fighting`, `Puzzle`
+See also: [P-ROM bank swap](#p-rom-bank-swap---swap-p), [ROM file naming](#pack-input-rom-file-naming).
 
-### `edit` - change `.neo` header metadata (no repack)
+---
 
-Updates TerraOnion header fields **without** touching P/S/M/V/C payload. At least one of the metadata flags below is required. Like `pack` and extract-to-ZIP, writes use a temporary file and atomic rename when updating the output path.
+### `edit` — change `.neo` header metadata (no repack)
+
+Updates TerraOnion header fields **without** touching P/S/M/V/C payload. At least one metadata option is required.
 
 ```bash
 # Correct title in place (overwrites the input file atomically)
@@ -265,7 +273,9 @@ neoconv edit game.neo --genre Fighting --year 1994 --ngh 65 --out game_fixed.neo
 | `--ngh` | — | **uint32** NGH number |
 | `--screenshot` | — | **uint32** screenshot index |
 
-### `detect-swap` - inspect P-ROM swap requirement
+---
+
+### `detect-swap` — inspect P-ROM swap requirement
 
 ```bash
 neoconv detect-swap input.zip
@@ -282,7 +292,11 @@ Inspecting P-ROM from ZIP: input.zip  (2,097,152 bytes)
   Reason  : Second half has valid vectors (SP=0x0010F300, Reset=0x00C00402) — swap required.
 ```
 
-### `info` - display `.neo` metadata
+See [P-ROM bank swap](#p-rom-bank-swap---swap-p) for `--swap-p` modes when packing.
+
+---
+
+### `info` — display `.neo` metadata
 
 Prints header metadata, ROM region sizes, and **MD5 per region** (P, S, M, V, C) when a full `.neo` is loaded — useful to compare two files that differ only in the header.
 
@@ -294,9 +308,21 @@ neoconv info input.neo
 
 ## Technical details
 
-### ROM role detection (MAME naming)
+Background on pack/extract behaviour, ROM naming, and the on-disk `.neo` layout.
 
-The table below matches the primary rules in `name_to_role`: extension (e.g. `.p1`, `.c1`) **or** basename suffix patterns such as `-p1.bin`, `_m1.bin`, or a stem ending in `-v3` / `_c2` (same keys as MAME-style `p1`…`c8`).
+| Section | Topics |
+|---------|--------|
+| [Pack input](#pack-input-rom-file-naming) | MAME filenames, directory layout, synthetic S-ROM |
+| [Extract sizing](#extract-c-and-v-rom-sizing) | Byte presets, C interleaving, V chunking |
+| [P-ROM swap](#p-rom-bank-swap---swap-p) | `--swap-p` / auto-detect |
+| [`.neo` format](#neo-container-format) | Header layout, V1/V2 fields |
+| [Notes](#notes) | CRC mismatches, out-of-scope items |
+
+---
+
+### Pack input: ROM file naming
+
+The table below matches the primary rules in `name_to_role`: extension (e.g. `.p1`, `.c1`) **or** basename suffix patterns such as `-p1.bin`, `_m1.bin`, or a stem ending in `-v3` / `_c2`.
 
 | Role | Recognized patterns |
 |------|---------------------|
@@ -306,15 +332,34 @@ The table below matches the primary rules in `name_to_role`: extension (e.g. `.p
 | **V ROMs** | `.v1`-`.v8`, `-v1.bin`-`-v8.bin`, `_v1.bin`-`_v8.bin` |
 | **C ROMs** | `.c1`-`.c16`, `-c1.bin`-`-c16.bin`, `_c1.bin`-`_c16.bin` (C9–C16 for extended / hack sets) |
 
-**Pack directory layout:** `pack` reads ROM files in the chosen folder **and one level of subfolders** (typical after unzipping). **Gaps** in the V or C sequence (e.g. `v1` + `v3` without `v2`) cause pack to **abort** with an error instead of producing a broken `.neo`.
+#### Directory layout and sequence gaps
 
-Not every MAME filename variant is mapped here (for example some `*-c1a.bin`-style names are **not** assigned a **C** role by this table). Those files may still be listed in the archive and participate in **other** logic (see below).
+`pack` reads ROM files in the chosen folder **and one level of subfolders** (typical after unzipping).
 
-**Synthetic S-ROM (no physical `s1`):** Some MAME parents (e.g. PVC / encrypted boards) ship without a separate text-layer `s1`; the driver uses a zero-filled "fixed" region. If **P** and **M** are present, there is **no** `s1`, but filenames look like a Neo Geo **C1** sprite set, `neoconv` may **inject** a zero-filled `S` region and emit a `UserWarning`. The fill size is chosen from filename heuristics aligned with `neogeo.xml`: basenames starting with `kf10-` (KOF2002 bootleg) → 256 KiB; ``-c1r.`` / ``-c2r.`` sprite chip names (e.g. `269-c1r.c1`) → 512 KiB; certain **three-digit MAME set IDs** in `NNN-p1.` / `NNN-m1.` / `NNN-c1….c1` patterns (see `_SYNTH_S_MAME_512K_SET_IDS` in `neoconv/core/constants.py`) → 512 KiB; otherwise → 128 KiB. This uses **digits in ROM filenames**.
+**Gaps** in the V or C sequence (e.g. `v1` + `v3` without `v2`) cause pack to **abort** with an error instead of producing a broken `.neo`.
+
+Not every MAME filename variant is mapped (for example some `*-c1a.bin`-style names are **not** assigned a **C** role). Those files may still participate in other logic (see below).
+
+#### Synthetic S-ROM (no physical `s1`)
+
+Some MAME parents (e.g. PVC / encrypted boards) ship without a separate text-layer `s1`; the driver uses a zero-filled "fixed" region. If **P** and **M** are present, there is **no** `s1`, but filenames look like a Neo Geo **C1** sprite set, `neoconv` may **inject** a zero-filled `S` region and emit a `UserWarning`. The fill size is chosen from filename heuristics aligned with `neogeo.xml`:
+
+| Pattern | Synthetic S size |
+|---------|------------------|
+| Basenames starting with `kf10-` (KOF2002 bootleg) | 256 KiB |
+| ``-c1r.`` / ``-c2r.`` sprite chip names (e.g. `269-c1r.c1`) | 512 KiB |
+| Certain **three-digit MAME set IDs** in `NNN-p1.` / `NNN-m1.` / `NNN-c1….c1` (see `_SYNTH_S_MAME_512K_SET_IDS` in `neoconv/core/constants.py`) | 512 KiB |
+| Default | 128 KiB |
+
+#### Ignored files
 
 Standard BIOS files (`000-lo.lo`, `sfix.sfix`, etc.) are ignored. Unknown files are also ignored unless `--diagnostic` is enabled.
 
-### Common extract sizes (CLI bytes)
+---
+
+### Extract: C and V ROM sizing
+
+#### Common extract sizes (CLI bytes)
 
 The CLI flags `--c-chip-size` and `--v-bank-size` take **bytes** (not megabytes). The GUI dropdown labels use MB/KB; values map to the same byte counts.
 
@@ -330,22 +375,36 @@ The CLI flags `--c-chip-size` and `--v-bank-size` take **bytes** (not megabytes)
 
 `0` for either flag means **`2097152`** (2 MB). Any other positive integer is accepted on the CLI.
 
-### C-ROM interleaving
+#### C-ROM interleaving
 
 C-ROM graphics are byte-interleaved in `.neo`:
 
-- even bytes -> odd chips (`c1`, `c3`, ...)
-- odd bytes -> even chips (`c2`, `c4`, ...)
+- even bytes → odd chips (`c1`, `c3`, …)
+- odd bytes → even chips (`c2`, `c4`, …)
 
-C chips always come in pairs. Interleaved bank size is `chip_size * 2`.
+C chips always come in pairs. Interleaved bank size is `chip_size × 2`.
 
 On **extract**, the default chip size is **2 MB** (`2097152` bytes; CLI/GUI). Larger chips (e.g. **4 MB** / `4194304` for Neo Turf Masters) must be selected explicitly — total C size in the `.neo` header does not uniquely determine per-chip size when multiple bank sizes would divide evenly.
 
-| | Default | GUI presets (see [bytes](#common-extract-sizes-cli-bytes)) | CLI |
-|---|---------|-------------------------------------------------------------|-----|
+| | Default | GUI presets | CLI |
+|---|---------|-------------|-----|
 | **C chip** (`c1`, `c2`, …) | 2 MB (`2097152`) | 512 KB – 20 MB | any positive byte value; `0` = `2097152` |
 
-**Choosing the right size:** For a known title, open MAME’s **`neogeo.xml`** (or the FBNeo ROM database for that set) and find the game’s `c1`, `c2`, … entries. The `size="…"` attribute on each file is the per-chip size in bytes (e.g. `size="4194304"` → `--c-chip-size 4194304`). The same list appears in many MAME front-ends when you inspect the ROM set. If extract fails with “not a multiple of chip_size*2”, try another size from that list.
+**Choosing the right size:** For a known title, open MAME’s **`neogeo.xml`** (or the FBNeo ROM database) and check each `c1`, `c2`, … entry. The `size="…"` attribute is the per-chip size in bytes (e.g. `size="4194304"` → `--c-chip-size 4194304`). If extract fails with “not a multiple of chip_size×2”, try another size from that list.
+
+#### V-ROM chunking
+
+V-ROM data is contiguous in `.neo` and split to `v1`, `v2`, … on extract. Default chunk size is **2 MB** (`2097152` bytes; `--v-bank-size 0` or GUI **V Bank Size**).
+
+| | Default | GUI presets | CLI |
+|---|---------|-------------|-----|
+| **V bank** (`v1`, `v2`, …) | 2 MB (`2097152`) | 512 KB – 16 MB | any positive byte value; `0` = `2097152` |
+
+**Choosing the right size:** In MAME **`neogeo.xml`**, check each `v1`, `v2`, … entry — the file `size` is the bank size for `--v-bank-size` (often 2 MB / `2097152`; some sets use 4 MB / `4194304`). Match what the MAME ZIP contains so filenames and lengths align after extract.
+
+If total V size is not a multiple of the bank size, the last file is shorter and a warning is emitted.
+
+---
 
 ### P-ROM bank swap (`--swap-p`)
 
@@ -361,25 +420,15 @@ Some Neo Geo titles and hacks store their 2 MB P-ROM with the two 1 MB halves in
 
 When auto-detect is **inconclusive** (neither half has plausible M68k vectors), pack continues **without** swap but prints **`[WARN]`** and emits a warning — run `neoconv detect-swap <zip>` or set `--swap-p yes` / `no` explicitly.
 
-Use `neoconv detect-swap <zip>` to inspect a dump without packing it.
-
-### V-ROM chunking
-
-V-ROM data is contiguous in `.neo` and split to `v1`, `v2`, … on extract. Default chunk size is **2 MB** (`2097152` bytes; `--v-bank-size 0` or GUI **V Bank Size**).
-
-| | Default | GUI presets (see [bytes](#common-extract-sizes-cli-bytes)) | CLI |
-|---|---------|-------------------------------------------------------------|-----|
-| **V bank** (`v1`, `v2`, …) | 2 MB (`2097152`) | 512 KB – 16 MB | any positive byte value; `0` = `2097152` |
-
-**Choosing the right size:** In MAME **`neogeo.xml`**, check the game’s `v1`, `v2`, … ROM entries — each file’s `size` is the bank size to use for `--v-bank-size` (often 2 MB; some sets use 4 MB or other sizes). Match what the MAME ZIP contains so filenames and lengths align after extract.
-
-If total V size is not a multiple of the bank size, the last file is shorter and a warning is emitted.
-
-### V1 / V2 header fields (read vs write)
-
-Some `.neo` files split the **total V ROM payload** across the **V1** and **V2** size fields at offsets `0x010` and `0x014`. **neoconv** reads both and merges the bytes in memory. On **output** (`pack`, `build_neo`, `replace_neo_metadata`, `extract` after repack), the header is **normalised**: all V length is stored in **V1** and **V2 is set to 0** (TerraOnion-style layout). Loading or rewriting such a file may emit a **`UserWarning`** so this header normalisation is visible.
+---
 
 ### `.neo` container format
+
+#### V1 / V2 size fields (read vs write)
+
+Some `.neo` files split the **total V ROM payload** across the **V1** and **V2** size fields at offsets `0x010` and `0x014`. **neoconv** reads both and merges the bytes in memory. On **output** (`pack`, `build_neo`, `replace_neo_metadata`), the header is **normalised**: all V length is stored in **V1** and **V2 is set to 0** (TerraOnion-style layout). Loading or rewriting such a file may emit a **`UserWarning`**.
+
+#### Header and payload layout
 
 ```text
 Offset 0x000   Magic         b'NEO\x01'  (4 bytes)
@@ -399,11 +448,19 @@ Offset 0x200-0xFFF  (padding, header is always 4096 bytes)
 Data:  P, S, M, V, C   (sequentially, sizes from header)
 ```
 
-### About CRC mismatches
+#### Atomic file writes
+
+`pack` (output `.neo`), `extract` (output ZIP), and `edit` write via a temporary file in the same directory and **`os.replace`**, so an interrupted run is less likely to leave a truncated file. **Directory extract** still overwrites individual ROM files in place (with warnings).
+
+---
+
+### Notes
+
+#### About CRC mismatches
 
 For hacks and CD conversions, MAME `verifyroms` may report CRC mismatches because data differs from known dumps. This is expected when the dump is intentionally different from MAME's reference set.
 
-### Out of scope
+#### Out of scope
 
 - Caching MD5 checksums inside `NeoMeta.format_info()` for repeated calls on large ROM sets: negligible benefit for typical CLI or GUI use, so it is not planned.
 
