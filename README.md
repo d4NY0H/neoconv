@@ -188,8 +188,8 @@ neoconv extract input.neo --prefix game --v-bank-size 4194304 --out game_v4m.zip
 | `--format`, `-f` | `mame` | Output format: `mame` (`.bin`) or `darksoft` (`.rom`) |
 | `--out`, `-o` | *(auto)* | Output ZIP path (ignored if `--out-dir` is set) |
 | `--out-dir`, `-d` | — | Extract to directory instead of ZIP; **wins over `--out`** when both are given |
-| `--c-chip-size` | `0` (2 MB) | Size of **each C chip** before interleaving (bytes). `0` = 2097152 (2 MB). **GUI presets:** 512 KB, 1 MB, 2 MB, 4 MB, 8 MB, 16 MB, 20 MB. **CLI:** any positive byte value. Not inferable from `.neo` alone — see [C-ROM interleaving](#c-rom-interleaving) |
-| `--v-bank-size` | `0` (2 MB) | Size of **each V output file** (`v1`, `v2`, …) in bytes. `0` = 2097152 (2 MB). **GUI presets:** 512 KB, 1 MB, 2 MB, 4 MB, 8 MB, 16 MB. **CLI:** any positive byte value. See [V-ROM chunking](#v-rom-chunking) |
+| `--c-chip-size` | `0` (= `2097152`) | Size of **each C chip** in **bytes** before interleaving. `0` = 2 MB. GUI presets match [common sizes](#common-extract-sizes-cli-bytes). **CLI:** any positive byte value. See [C-ROM interleaving](#c-rom-interleaving) |
+| `--v-bank-size` | `0` (= `2097152`) | Size of **each V file** (`v1`, `v2`, …) in **bytes**. `0` = 2 MB. GUI presets match [common sizes](#common-extract-sizes-cli-bytes). See [V-ROM chunking](#v-rom-chunking) |
 
 **Overwrite behaviour:** Existing output files are replaced without prompting. A **warning** is printed (CLI: stderr; GUI: log) for each path that already exists. Directory extract updates files in place; ZIP output is replaced atomically (see below).
 
@@ -229,12 +229,12 @@ neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--name`, `-n` | `Unknown` | Game name stored in `.neo` header |
-| `--manufacturer`, `-m` | `Unknown` | Manufacturer string |
-| `--year`, `-y` | `0` | Release year |
-| `--genre`, `-g` | `Other` | Genre name or genre ID |
-| `--ngh` | `0` | NGH number (decimal integer) |
-| `--screenshot` | `0` | TerraOnion screenshot index |
+| `--name`, `-n` | `Unknown` | Game title in the `.neo` header: **latin-1**, max **32** content bytes (33-byte field incl. NUL). The GUI truncates to this limit. |
+| `--manufacturer`, `-m` | `Unknown` | Manufacturer string: **latin-1**, max **16** content bytes (17-byte field incl. NUL). The GUI truncates to this limit. |
+| `--year`, `-y` | `0` | Release year: **uint16** (0–65535). |
+| `--genre`, `-g` | `Other` | Genre **name** or numeric **uint16** id (see list below). |
+| `--ngh` | `0` | NGH catalogue number: **uint32** (non-negative integer). |
+| `--screenshot` | `0` | TerraOnion screenshot index: **uint32** (non-negative integer). |
 | `--out`, `-o` | *(input stem + `.neo`)* | Output `.neo` path |
 | `--swap-p` | `auto` | P-ROM half-swap mode: `auto` (heuristic, default), `yes` (always), `no` (never) |
 | `--diagnostic` | off | Warn on unrecognized filenames |
@@ -258,12 +258,12 @@ neoconv edit game.neo --genre Fighting --year 1994 --ngh 65 --out game_fixed.neo
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--out`, `-o` | *(overwrite input)* | Output `.neo` path |
-| `--name`, `-n` | — | Game name |
-| `--manufacturer`, `-m` | — | Manufacturer |
-| `--year`, `-y` | — | Release year |
-| `--genre`, `-g` | — | Genre name or numeric id (same set as `pack`) |
-| `--ngh` | — | NGH number |
-| `--screenshot` | — | TerraOnion screenshot index |
+| `--name`, `-n` | — | Same limits as `pack`: latin-1, max **32** content bytes |
+| `--manufacturer`, `-m` | — | Same limits as `pack`: latin-1, max **16** content bytes |
+| `--year`, `-y` | — | **uint16** year |
+| `--genre`, `-g` | — | Genre name or **uint16** id (same set as `pack`) |
+| `--ngh` | — | **uint32** NGH number |
+| `--screenshot` | — | **uint32** screenshot index |
 
 ### `detect-swap` - inspect P-ROM swap requirement
 
@@ -314,6 +314,22 @@ Not every MAME filename variant is mapped here (for example some `*-c1a.bin`-sty
 
 Standard BIOS files (`000-lo.lo`, `sfix.sfix`, etc.) are ignored. Unknown files are also ignored unless `--diagnostic` is enabled.
 
+### Common extract sizes (CLI bytes)
+
+The CLI flags `--c-chip-size` and `--v-bank-size` take **bytes** (not megabytes). The GUI dropdown labels use MB/KB; values map to the same byte counts.
+
+| Label | CLI value (`--c-chip-size` / `--v-bank-size`) | C GUI | V GUI |
+|-------|-----------------------------------------------|-------|-------|
+| 512 KB | `524288` | ✅ | ✅ |
+| 1 MB | `1048576` | ✅ | ✅ |
+| 2 MB (default) | `2097152` | ✅ | ✅ |
+| 4 MB | `4194304` | ✅ | ✅ |
+| 8 MB | `8388608` | ✅ | ✅ |
+| 16 MB | `16777216` | ✅ | ✅ |
+| 20 MB | `20971520` | ✅ (C only) | — |
+
+`0` for either flag means **`2097152`** (2 MB). Any other positive integer is accepted on the CLI.
+
 ### C-ROM interleaving
 
 C-ROM graphics are byte-interleaved in `.neo`:
@@ -323,11 +339,11 @@ C-ROM graphics are byte-interleaved in `.neo`:
 
 C chips always come in pairs. Interleaved bank size is `chip_size * 2`.
 
-On **extract**, the default chip size is **2 MB** (CLI/GUI). Larger chips (e.g. **4 MB** for Neo Turf Masters) must be selected explicitly — total C size in the `.neo` header does not uniquely determine per-chip size when multiple bank sizes would divide evenly.
+On **extract**, the default chip size is **2 MB** (`2097152` bytes; CLI/GUI). Larger chips (e.g. **4 MB** / `4194304` for Neo Turf Masters) must be selected explicitly — total C size in the `.neo` header does not uniquely determine per-chip size when multiple bank sizes would divide evenly.
 
-| | Default | GUI presets | CLI |
-|---|---------|-------------|-----|
-| **C chip** (`c1`, `c2`, …) | 2 MB | 512 KB, 1 MB, 2 MB, 4 MB, 8 MB, 16 MB, 20 MB | any byte value; `0` = 2 MB |
+| | Default | GUI presets (see [bytes](#common-extract-sizes-cli-bytes)) | CLI |
+|---|---------|-------------------------------------------------------------|-----|
+| **C chip** (`c1`, `c2`, …) | 2 MB (`2097152`) | 512 KB – 20 MB | any positive byte value; `0` = `2097152` |
 
 **Choosing the right size:** For a known title, open MAME’s **`neogeo.xml`** (or the FBNeo ROM database for that set) and find the game’s `c1`, `c2`, … entries. The `size="…"` attribute on each file is the per-chip size in bytes (e.g. `size="4194304"` → `--c-chip-size 4194304`). The same list appears in many MAME front-ends when you inspect the ROM set. If extract fails with “not a multiple of chip_size*2”, try another size from that list.
 
@@ -349,11 +365,11 @@ Use `neoconv detect-swap <zip>` to inspect a dump without packing it.
 
 ### V-ROM chunking
 
-V-ROM data is contiguous in `.neo` and split to `v1`, `v2`, … on extract. Default chunk size is **2 MB** (`--v-bank-size 0` or GUI **V Bank Size**).
+V-ROM data is contiguous in `.neo` and split to `v1`, `v2`, … on extract. Default chunk size is **2 MB** (`2097152` bytes; `--v-bank-size 0` or GUI **V Bank Size**).
 
-| | Default | GUI presets | CLI |
-|---|---------|-------------|-----|
-| **V bank** (`v1`, `v2`, …) | 2 MB | 512 KB, 1 MB, 2 MB, 4 MB, 8 MB, 16 MB | any byte value; `0` = 2 MB |
+| | Default | GUI presets (see [bytes](#common-extract-sizes-cli-bytes)) | CLI |
+|---|---------|-------------------------------------------------------------|-----|
+| **V bank** (`v1`, `v2`, …) | 2 MB (`2097152`) | 512 KB – 16 MB | any positive byte value; `0` = `2097152` |
 
 **Choosing the right size:** In MAME **`neogeo.xml`**, check the game’s `v1`, `v2`, … ROM entries — each file’s `size` is the bank size to use for `--v-bank-size` (often 2 MB; some sets use 4 MB or other sizes). Match what the MAME ZIP contains so filenames and lengths align after extract.
 
