@@ -4,6 +4,14 @@
 
 Use **`neoconv`** on the command line or via **`neoconv-gui`** (same core engine). It **packs** MAME ZIPs or ROM folders into `.neo`, **extracts** `.neo` back to individual ROM files, and **rewrites** headers when only metadata needs to change. It handles C-ROM byte-interleaving, **P-ROM half-swap** (default: **auto-detect** from the M68000 vector table, with `yes` / `no` overrides), V-ROM chunking, and TerraOnion header fields — for commercial dumps, hacks, CD conversions, and homebrew.
 
+### Getting started
+
+| Goal | Command / tab |
+|------|----------------|
+| MAME ZIP or ROM folder → `.neo` | `neoconv pack …` or GUI **Pack** |
+| `.neo` → MAME / Darksoft ROM files | `neoconv extract …` or GUI **Extract** |
+| Fix title, genre, NGH, … without repacking | `neoconv edit …` or GUI **Edit** |
+
 ---
 
 ## Why neoconv?
@@ -16,7 +24,7 @@ Most Neo Geo tools only handle one direction or break on non-standard sets. `neo
 | **Universal** | Handles commercial sets, hacks, CD conversions, and homebrew |
 | **Transparent** | C interleaving, P-ROM swap (auto or manual), and V chunking are explicit and documented |
 | **Configurable** | On **extract**: `--c-chip-size` and `--v-bank-size` in bytes. **neoconv** falls back to **2 MB** (`2097152`) when unset; the correct value per game comes from the MAME ROM set (e.g. 4 MB / `4194304` C chips for Neo Turf Masters), not from the `.neo` header alone |
-| **Dual interface** | CLI and GUI expose the same core workflows |
+| **Dual interface** | Same pack / extract / edit / info workflows in CLI and GUI |
 
 ---
 
@@ -29,7 +37,7 @@ Both interfaces support the same core workflows:
 | Extract `.neo` to MAME / Darksoft files | ✅ | ✅ |
 | Pack MAME ZIP or directory to `.neo` | ✅ | ✅ |
 | Edit `.neo` header metadata (no repack) | ✅ | ✅ |
-| View `.neo` metadata and region sizes | ✅ | ✅ |
+| View `.neo` metadata, region sizes, and per-region MD5 | ✅ | ✅ |
 | P-ROM bank swap (auto-detect + manual override) | ✅ | ✅ |
 | Standalone `detect-swap` (inspect P-ROM without packing) | ✅ | — *(Pack with **Auto-detect** logs the same check in the GUI)* |
 | Diagnostic mode for unrecognized files | ✅ | ✅ |
@@ -87,7 +95,7 @@ brew install python tcl-tk
 
 ### Prebuilt GUI binaries (Windows, macOS, Linux)
 
-Download the latest binary from the [Releases](https://github.com/d4NY0H/neoconv/releases) page — no Python installation required.
+Download the latest binary from the [Releases](https://github.com/d4NY0H/neoconv/releases) page — no Python installation required. Prebuilt assets are **GUI only**; install from source (below) for the **`neoconv`** CLI.
 
 | Platform | File |
 |----------|------|
@@ -148,10 +156,10 @@ Tabs:
 
 | Tab | Description |
 |-----|-------------|
-| **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap mode selectable via radio (`auto` / `yes` / `no`) |
-| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory; **C Chip Size** / **V Bank Size** presets (512 KB–20 MB / 16 MB) or any size via CLI |
-| **Edit** | Load header fields from a `.neo`, adjust metadata, write back (optional separate output path) |
-| **Info** | Inspect metadata and ROM region sizes from a `.neo` file |
+| **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap via radio (`auto` / `yes` / `no`). Status line checks mandatory P/S/M roles and warns on **V/C filename gaps** before pack |
+| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory; **C Chip Size** / **V Bank Size** dropdowns (presets 512 KB–20 MB / 16 MB). Arbitrary byte sizes: CLI only (`--c-chip-size`, `--v-bank-size`) |
+| **Edit** | Load header fields from a `.neo`, adjust metadata (name/manufacturer truncated to header limits), write back (optional separate output path) |
+| **Info** | Inspect metadata, ROM region sizes, and **MD5 per region** (P, S, M, V, C) |
 
 ---
 
@@ -164,6 +172,8 @@ python3 -m neoconv <command> [options]
 ```
 
 Commands: **`extract`**, **`pack`**, **`edit`**, **`detect-swap`**, **`info`**.
+
+On failure, the CLI prints `Error: …` to **stderr** and exits with code **1** (missing ROMs, invalid options, bad `.neo`, and similar cases) instead of a Python traceback.
 
 ---
 
@@ -245,7 +255,21 @@ neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
 | `--swap-p` | `auto` | P-ROM half-swap mode: `auto` (heuristic, default), `yes` (always), `no` (never) |
 | `--diagnostic` | off | Warn on unrecognized filenames |
 
-**Available genres:** `Other`, `Action`, `BeatEmUp`, `Sports`, `Driving`, `Platformer`, `Mahjong`, `Shooter`, `Quiz`, `Fighting`, `Puzzle`
+**Genres** (`--genre` name or numeric id):
+
+| ID | Name |
+|----|------|
+| 0 | Other |
+| 1 | Action |
+| 2 | BeatEmUp |
+| 3 | Sports |
+| 4 | Driving |
+| 5 | Platformer |
+| 6 | Mahjong |
+| 7 | Shooter |
+| 8 | Quiz |
+| 9 | Fighting |
+| 10 | Puzzle |
 
 See also: [P-ROM bank swap](#p-rom-bank-swap---swap-p), [ROM file naming](#pack-input-rom-file-naming).
 
@@ -367,13 +391,13 @@ The CLI flags `--c-chip-size` and `--v-bank-size` take **bytes** (not megabytes)
 |-------|-----------------------------------------------|-------|-------|
 | 512 KB | `524288` | ✅ | ✅ |
 | 1 MB | `1048576` | ✅ | ✅ |
-| 2 MB (default) | `2097152` | ✅ | ✅ |
+| 2 MB (unset / `0`) | `2097152` | ✅ | ✅ |
 | 4 MB | `4194304` | ✅ | ✅ |
 | 8 MB | `8388608` | ✅ | ✅ |
 | 16 MB | `16777216` | ✅ | ✅ |
 | 20 MB | `20971520` | ✅ (C only) | — |
 
-`0` for either flag means **`2097152`** (2 MB). Any other positive integer is accepted on the CLI.
+`0` for either flag is **neoconv’s fallback** (`2097152`, 2 MB), not necessarily the correct size for every game. Any other positive integer is accepted on the CLI.
 
 #### C-ROM interleaving
 
@@ -384,20 +408,20 @@ C-ROM graphics are byte-interleaved in `.neo`:
 
 C chips always come in pairs. Interleaved bank size is `chip_size × 2`.
 
-On **extract**, the default chip size is **2 MB** (`2097152` bytes; CLI/GUI). Larger chips (e.g. **4 MB** / `4194304` for Neo Turf Masters) must be selected explicitly — total C size in the `.neo` header does not uniquely determine per-chip size when multiple bank sizes would divide evenly.
+On **extract**, if unset, **neoconv** assumes **2 MB** per chip (`2097152` bytes; CLI `0` / GUI “2 MB”). Larger chips (e.g. **4 MB** / `4194304` for Neo Turf Masters) must match the MAME set — total C size in the `.neo` header does not uniquely determine per-chip size.
 
-| | Default | GUI presets | CLI |
-|---|---------|-------------|-----|
+| | When unset | GUI presets | CLI |
+|---|------------|-------------|-----|
 | **C chip** (`c1`, `c2`, …) | 2 MB (`2097152`) | 512 KB – 20 MB | any positive byte value; `0` = `2097152` |
 
 **Choosing the right size:** For a known title, open MAME’s **`neogeo.xml`** (or the FBNeo ROM database) and check each `c1`, `c2`, … entry. The `size="…"` attribute is the per-chip size in bytes (e.g. `size="4194304"` → `--c-chip-size 4194304`). If extract fails with “not a multiple of chip_size×2”, try another size from that list.
 
 #### V-ROM chunking
 
-V-ROM data is contiguous in `.neo` and split to `v1`, `v2`, … on extract. Default chunk size is **2 MB** (`2097152` bytes; `--v-bank-size 0` or GUI **V Bank Size**).
+V-ROM data is contiguous in `.neo` and split to `v1`, `v2`, … on extract. When unset, chunk size is **2 MB** (`2097152`; `--v-bank-size 0` or GUI **V Bank Size**).
 
-| | Default | GUI presets | CLI |
-|---|---------|-------------|-----|
+| | When unset | GUI presets | CLI |
+|---|------------|-------------|-----|
 | **V bank** (`v1`, `v2`, …) | 2 MB (`2097152`) | 512 KB – 16 MB | any positive byte value; `0` = `2097152` |
 
 **Choosing the right size:** In MAME **`neogeo.xml`**, check each `v1`, `v2`, … entry — the file `size` is the bank size for `--v-bank-size` (often 2 MB / `2097152`; some sets use 4 MB / `4194304`). Match what the MAME ZIP contains so filenames and lengths align after extract.
