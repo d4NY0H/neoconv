@@ -11,6 +11,7 @@ Use **`neoconv`** on the command line or via **`neoconv-gui`** (same core engine
 | MAME ZIP or ROM folder → `.neo` | `neoconv pack …` or GUI **Pack** |
 | `.neo` → MAME / Darksoft ROM files | `neoconv extract …` or GUI **Extract** |
 | Fix title, genre, NGH, … without repacking | `neoconv edit …` or GUI **Edit** |
+| Inspect metadata, sizes, and MD5 hashes | `neoconv info …` or GUI **Info** |
 
 ---
 
