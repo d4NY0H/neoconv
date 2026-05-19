@@ -174,7 +174,8 @@ def cmd_extract(args: argparse.Namespace) -> None:
         for role, p in sorted(written.items()):
             print(f"  {p.name:<30} {p.stat().st_size:>10,} bytes")
     else:
-        assert out_path is not None
+        if out_path is None:
+            raise RuntimeError("out_path unexpectedly None — this is a bug in cmd_extract")
         print(f"Written: {out_path}  ({len(zip_data)/1024/1024:.2f} MB)")
         with zipfile.ZipFile(out_path) as zf:
             for info in zf.infolist():
