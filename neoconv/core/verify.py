@@ -36,15 +36,18 @@ def verify_roundtrip(
     if data_match:
         details = "ROM data regions are byte-identical. Extraction is lossless."
     else:
-        for i, (a, b) in enumerate(zip(orig_data, new_data)):
-            if a != b:
-                details = (
-                    f"First difference at ROM offset 0x{i:X} "
-                    f"(file offset 0x{NEO_HEADER_SIZE + i:X}). "
-                    f"Original: {orig_data[i : i + 8].hex()}  "
-                    f"Rebuilt:  {new_data[i : i + 8].hex()}"
-                )
-                break
+        i = next(
+            (i for i in range(min(len(orig_data), len(new_data)))
+             if orig_data[i] != new_data[i]),
+            None,
+        )
+        if i is not None:
+            details = (
+                f"First difference at ROM offset 0x{i:X} "
+                f"(file offset 0x{NEO_HEADER_SIZE + i:X}). "
+                f"Original: {orig_data[i : i + 8].hex()}  "
+                f"Rebuilt:  {new_data[i : i + 8].hex()}"
+            )
         else:
             details = "Data regions differ in length."
 
