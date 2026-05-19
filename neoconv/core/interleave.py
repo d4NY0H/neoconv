@@ -9,6 +9,11 @@ def interleave_c_chips(chips: list[bytes]) -> bytes:
     chips = [c1, c2, c3, c4, ...]
     Output: interleaved(c1,c2) + interleaved(c3,c4) + ...
     """
+    if len(chips) % 2 != 0:
+        raise ValueError(
+            f"C chips must come in pairs; got {len(chips)} chip(s). "
+            "Check that all C ROM files are present and correctly named."
+        )
     result = bytearray()
     for i in range(0, len(chips), 2):
         a = chips[i]
