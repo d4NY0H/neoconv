@@ -19,6 +19,7 @@ from neoconv.core import (
     GENRES,
     NeoMeta,
     RomSet,
+    SwapMode,
     P_SWAP_SIZE,
     apply_swap_p,
     check_m68k_vectors,
@@ -972,7 +973,7 @@ class TestDetectSwapP:
             v=make_rom(2 * 1024 * 1024),
             c=interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE)]),
         )
-        rs_after = apply_swap_p(rs, "auto", verbose=False)
+        rs_after = apply_swap_p(rs, SwapMode.AUTO, verbose=False)
         HALF = P_SWAP_SIZE // 2
         # After auto-swap the first half must be the originally-second half
         assert rs_after.p[:HALF] == p_with_valid_second[HALF:]
@@ -987,7 +988,7 @@ class TestDetectSwapP:
             v=make_rom(2 * 1024 * 1024),
             c=interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE)]),
         )
-        rs_after = apply_swap_p(rs, "auto", verbose=False)
+        rs_after = apply_swap_p(rs, SwapMode.AUTO, verbose=False)
         assert rs_after.p == p_with_valid_first  # unchanged
 
     def test_auto_swap_inconclusive_emits_warning(self):
@@ -995,7 +996,7 @@ class TestDetectSwapP:
 
         rs = RomSet(p=make_rom(P_SWAP_SIZE, 0xFF))
         with pytest.warns(UserWarning, match="inconclusive"):
-            apply_swap_p(rs, "auto", verbose=False)
+            apply_swap_p(rs, SwapMode.AUTO, verbose=False)
 
 
 class TestPackPreflight:
@@ -1144,7 +1145,7 @@ class TestEndToEndRoundtrip:
         # Full neo roundtrip with swap applied
         from neoconv.core import apply_swap_p
         import dataclasses
-        rs_swapped = apply_swap_p(romset, True, verbose=False)
+        rs_swapped = apply_swap_p(romset, SwapMode.YES, verbose=False)
         original_neo = build_neo(rs_swapped, meta)
 
         zip_bytes = extract_neo_to_zip(original_neo, name_prefix="rtrip", fmt="mame")
