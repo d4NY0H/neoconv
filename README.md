@@ -376,6 +376,21 @@ Some MAME parents (e.g. PVC / encrypted boards) ship without a separate text-lay
 | Certain **three-digit MAME set IDs** in `NNN-p1.` / `NNN-m1.` / `NNN-c1….c1` (see `_SYNTH_S_MAME_512K_SET_IDS` in `neoconv/core/constants.py`) | 512 KiB |
 | Default | 128 KiB |
 
+#### FBNeo compatibility
+
+FBNeo Neo Geo sets use the same ROM naming conventions as MAME and are supported out of the box. BIOS-related files (`000-lo.lo`, `sfix.sfix`, `sm1.sm1`, `sp-s2.sp1`, etc.) are ignored automatically.
+
+Sets where C-chip filenames carry a suffix in the **stem** but use native extensions (e.g. `263-c1d.c1`, `269-c1r.c1`, `268-c1c.c1`) are recognised correctly — the extension `.c1` / `.c2` match takes priority.
+
+**Exception — split C chips (`c1a` + `c1b` style):** Four hack/homebrew sets use a two-file split for individual C chips with `.bin` extension:
+
+| Set | Files | Fix |
+|-----|-------|-----|
+| `kog`, `kogplus` | `5232-c1a.bin` + `5232-c1b.bin` → `c1`, etc. | `cat 5232-c1a.bin 5232-c1b.bin > 5232-c1.bin` |
+| `kof10th` and variants | `kf10-c1a.bin` + `kf10-c1b.bin` → `c1`, etc. | `cat kf10-c1a.bin kf10-c1b.bin > kf10-c1.bin` |
+
+Merge each split pair with `cat` (Linux/macOS) before packing. All official SNK titles and the vast majority of hacks work without any preparation.
+
 #### Ignored files
 
 Standard BIOS files (`000-lo.lo`, `sfix.sfix`, etc.) are ignored. Unknown files are also ignored unless `--diagnostic` is enabled.
