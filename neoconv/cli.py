@@ -42,6 +42,7 @@ from .core import (
     GENRE_BY_NAME,
     NeoMeta,
     RomSet,
+    SwapMode,
     build_neo,
     detect_swap_p_needed,
     extract_neo,
@@ -196,13 +197,7 @@ def cmd_pack(args: argparse.Namespace) -> None:
     out_path = Path(args.out) if args.out else src.with_suffix(".neo")
 
     # --swap-p choices: "auto" | "yes" | "no"
-    raw = args.swap_p
-    if raw == "yes":
-        swap_p: "bool | str" = True
-    elif raw == "auto":
-        swap_p = "auto"
-    else:
-        swap_p = False
+    swap_p = SwapMode(args.swap_p)
 
     if src.is_dir():
         print(f"Packing directory: {src}")
