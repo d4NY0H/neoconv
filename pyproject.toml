@@ -28,3 +28,6 @@ Issues   = "https://github.com/d4NY0H/neoconv/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.setuptools.package-data]
+neoconv = ["py.typed"]
