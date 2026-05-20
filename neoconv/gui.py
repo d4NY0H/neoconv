@@ -911,7 +911,7 @@ class PackTab(ttk.Frame):
 
                     with warnings.catch_warnings(record=True) as caught:
                         warnings.simplefilter("always")
-                        romset = apply_swap_p(rs_probe, "auto", verbose=False)
+                        romset = apply_swap_p(rs_probe, SwapMode.AUTO, verbose=False)
                         neo_data = build_neo(romset, meta)
                     pack_warnings.extend(caught)
                 else:
