@@ -26,6 +26,8 @@ from .core import (
     V_BANK_SIZE,
     NEO_HEADER_SIZE,
     NeoMeta,
+    apply_swap_p,
+    build_neo,
     collect_pack_psm_roles_for_validation,
     collect_pack_sequence_issues,
     iter_mame_dir_rom_files,
@@ -36,6 +38,8 @@ from .core import (
     mame_dir_to_neo,
     mame_zip_to_neo,
     pack_psm_role_from_basename,
+    parse_mame_dir,
+    parse_mame_zip,
     parse_neo,
     parse_neo_header_metadata,
     replace_neo_metadata,
@@ -881,45 +885,41 @@ class PackTab(ttk.Frame):
 
                 pack_warnings: list[warnings.WarningMessage] = []
 
-                # Auto-swap: Diagnose ins Log (nicht nochmal auf stdout)
-                if swap_p == "auto":
-                    from .core import parse_mame_dir, parse_mame_zip
+                fn_parse = parse_mame_dir if src.is_dir() else parse_mame_zip
 
+                if swap_p == "auto":
+                    # Parse once, reuse the RomSet for swap-detection AND build.
+                    # Avoids a second full parse of potentially 100+ MB C-ROM data.
                     with warnings.catch_warnings(record=True) as wprobe:
                         warnings.simplefilter("always")
-                        rs_probe = (parse_mame_dir if src.is_dir() else parse_mame_zip)(src)
+                        rs_probe = fn_parse(src, diagnostic=diagnostic)
                     pack_warnings.extend(wprobe)
 
                     needed, reason = detect_swap_p_needed(rs_probe.p)
                     tag = "auto-swap: YES -" if needed else "auto-swap: no -"
                     self._wbridge.post_log(f"  {tag} {reason}")
-                if self._cancel_event.is_set():
-                    raise RuntimeError("Operation cancelled by user.")
+                    if self._cancel_event.is_set():
+                        raise RuntimeError("Operation cancelled by user.")
 
-                fn = mame_dir_to_neo if src.is_dir() else mame_zip_to_neo
-                swap_verbose = swap_p != "auto"
-                if diagnostic:
+                    with warnings.catch_warnings(record=True) as caught:
+                        warnings.simplefilter("always")
+                        romset = apply_swap_p(rs_probe, "auto", verbose=False)
+                        neo_data = build_neo(romset, meta)
+                    pack_warnings.extend(caught)
+                else:
+                    if self._cancel_event.is_set():
+                        raise RuntimeError("Operation cancelled by user.")
+                    fn = mame_dir_to_neo if src.is_dir() else mame_zip_to_neo
                     with warnings.catch_warnings(record=True) as caught:
                         warnings.simplefilter("always")
                         neo_data = fn(
                             src,
                             meta,
                             swap_p=swap_p,
-                            diagnostic=True,
-                            swap_verbose=swap_verbose,
+                            diagnostic=diagnostic,
+                            swap_verbose=True,
                         )
                     pack_warnings.extend(caught)
-                else:
-                    with warnings.catch_warnings(record=True) as caught_nd:
-                        warnings.simplefilter("always")
-                        neo_data = fn(
-                            src,
-                            meta,
-                            swap_p=swap_p,
-                            diagnostic=False,
-                            swap_verbose=swap_verbose,
-                        )
-                    pack_warnings.extend(caught_nd)
 
                 _seen_warn: set[str] = set()
                 for wm in pack_warnings:
