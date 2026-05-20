@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from neoconv.core import SwapMode
 from neoconv import cli
 from neoconv.core import parse_neo, write_bytes_atomic as _write_bytes_atomic
 
@@ -234,7 +235,7 @@ def test_cmd_pack_swap_no_branch(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "mame_dir_to_neo", _capture)
     monkeypatch.setattr(cli, "_print_neo_info", lambda *_: None)
     cli.cmd_pack(_pack_namespace(roms, tmp_path / "o.neo", swap_p="no"))
-    assert captured["swap_p"] is False
+    assert captured["swap_p"] is SwapMode.NO
 
 
 def test_cmd_pack_invalid_input_exits(monkeypatch, tmp_path):
