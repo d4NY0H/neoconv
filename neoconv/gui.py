@@ -38,6 +38,7 @@ from .core import (
     V_BANK_SIZE,
     NEO_HEADER_SIZE,
     NeoMeta,
+    SwapMode,
     apply_swap_p,
     build_neo,
     collect_pack_psm_roles_for_validation,
@@ -870,12 +871,7 @@ class PackTab(ttk.Frame):
             ngh=ngh,
             screenshot=screenshot,
         )
-        swap_p_raw = self._swap_p.get()          # "no" | "auto" | "yes"
-        swap_p: bool | str = (
-            True  if swap_p_raw == "yes"  else
-            "auto" if swap_p_raw == "auto" else
-            False
-        )
+        swap_p = SwapMode(self._swap_p.get())  # "no" | "auto" | "yes"
         diagnostic = self._diagnostic.get()
         self._log.clear()
         self._wbridge.cancel_pump()
@@ -899,7 +895,7 @@ class PackTab(ttk.Frame):
 
                 fn_parse = parse_mame_dir if src.is_dir() else parse_mame_zip
 
-                if swap_p == "auto":
+                if swap_p is SwapMode.AUTO:
                     # Parse once, reuse the RomSet for swap-detection AND build.
                     # Avoids a second full parse of potentially 100+ MB C-ROM data.
                     with warnings.catch_warnings(record=True) as wprobe:
