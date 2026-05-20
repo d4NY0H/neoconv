@@ -1,11 +1,26 @@
-"""Dataclasses for Neo Geo metadata and assembled ROM regions."""
+"""Dataclasses and enums for Neo Geo metadata and assembled ROM regions."""
 
 from __future__ import annotations
 
+import enum
 import hashlib
 from dataclasses import dataclass, field
 
 from .constants import C_CHIP_SIZE_DEFAULT, GENRES, NEO_HEADER_SIZE, V_BANK_SIZE
+
+
+class SwapMode(enum.Enum):
+    """P-ROM half-swap behaviour for :func:`~neoconv.core.apply_swap_p`.
+
+    ``AUTO``  — inspect the M68000 vector table and swap only when the second
+                half carries valid SP / Reset vectors (default for ``pack``).
+    ``YES``   — always swap (use when auto-detect is ambiguous).
+    ``NO``    — never swap.
+    """
+
+    AUTO = "auto"
+    YES = "yes"
+    NO = "no"
 
 
 @dataclass
