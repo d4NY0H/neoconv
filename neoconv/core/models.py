@@ -18,7 +18,11 @@ class NeoMeta:
     ngh: int = 0
 
     def format_info(self, romset: "RomSet | None" = None) -> str:
-        """Return a human-readable summary, optionally including ROM sizes and per-region MD5."""
+        """Return a human-readable summary, optionally including ROM sizes and per-region MD5.
+
+        MD5 is recomputed on every call. For typical CLI / GUI use (single call per
+        run) this is negligible; caching is intentionally omitted to keep the dataclass simple.
+        """
         lines = [
             f"  Name         : {self.name}",
             f"  Manufacturer : {self.manufacturer}",
