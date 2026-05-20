@@ -8,28 +8,28 @@ from pathlib import Path
 
 from .constants import P_SWAP_SIZE
 from .mame_parse import parse_mame_dir, parse_mame_zip
-from .models import NeoMeta, RomSet
+from .models import NeoMeta, RomSet, SwapMode
 from .neo_format import build_neo
 from .swap_detect import detect_swap_p_needed, swap_p_banks
 
 
-def apply_swap_p(romset: RomSet, swap_p: bool | str, verbose: bool = True) -> RomSet:
+def apply_swap_p(romset: RomSet, swap_p: SwapMode, verbose: bool = True) -> RomSet:
     """
-    Apply P-ROM bank swap according to *swap_p*:
+    Apply P-ROM bank swap according to *swap_p*.
 
-    - ``True``   : always swap (legacy ``--swap-p`` flag)
-    - ``False``  : never swap
-    - ``"auto"`` : call :func:`detect_swap_p_needed` and swap only when the
-                   heuristic says so; prints a short diagnostic line if *verbose*.
+    - :attr:`SwapMode.AUTO` : call :func:`detect_swap_p_needed` and swap only
+                              when the heuristic says so; prints a diagnostic
+                              line if *verbose*.
+    - :attr:`SwapMode.YES`  : always swap.
+    - :attr:`SwapMode.NO`   : never swap.
 
     Returns a new :class:`RomSet` with the swapped P-ROM; the original is
     never modified.
 
-    Raises :class:`ValueError` with a clear message when ``swap_p=True`` is
-    requested for a P-ROM that is not exactly 2 MB, rather than letting the
-    confusing low-level error from :func:`swap_p_banks` propagate.
+    Raises :class:`ValueError` with a clear message when :attr:`SwapMode.YES`
+    is requested for a P-ROM that is not exactly 2 MB.
     """
-    if swap_p == "auto":
+    if swap_p is SwapMode.AUTO:
         needed, reason = detect_swap_p_needed(romset.p)
         inconclusive = "inconclusive" in reason.lower()
         if verbose:
@@ -51,7 +51,7 @@ def apply_swap_p(romset: RomSet, swap_p: bool | str, verbose: bool = True) -> Ro
             )
         if needed:
             return replace(romset, p=swap_p_banks(romset.p))
-    elif swap_p:
+    elif swap_p is SwapMode.YES:
         p_size = len(romset.p)
         if p_size != P_SWAP_SIZE:
             raise ValueError(
@@ -67,7 +67,7 @@ def apply_swap_p(romset: RomSet, swap_p: bool | str, verbose: bool = True) -> Ro
 def mame_zip_to_neo(
     zip_path: Path,
     meta: NeoMeta,
-    swap_p: bool | str = False,
+    swap_p: SwapMode = SwapMode.NO,
     diagnostic: bool = False,
     swap_verbose: bool = True,
 ) -> bytes:
@@ -75,13 +75,12 @@ def mame_zip_to_neo(
 
     Parameters
     ----------
-    swap_p : False  → no swap (default)
-             True   → always swap
-             "auto" → heuristic detection via :func:`detect_swap_p_needed`
-             The CLI ``pack`` subcommand and GUI use ``"auto"`` by default; pass
-             ``swap_p="auto"`` here for the same behaviour.
+    swap_p
+        :attr:`SwapMode.NO` (default), :attr:`SwapMode.YES`, or
+        :attr:`SwapMode.AUTO` (heuristic via :func:`detect_swap_p_needed`).
+        The CLI ``pack`` subcommand and GUI pass ``SwapMode.AUTO`` by default.
     swap_verbose
-        If True (default), print auto-detect diagnostics for ``swap_p="auto"``.
+        If True (default), print auto-detect diagnostics for ``SwapMode.AUTO``.
     """
     romset = parse_mame_zip(zip_path, diagnostic=diagnostic)
     romset = apply_swap_p(romset, swap_p, verbose=swap_verbose)
@@ -91,7 +90,7 @@ def mame_zip_to_neo(
 def mame_dir_to_neo(
     dir_path: Path,
     meta: NeoMeta,
-    swap_p: bool | str = False,
+    swap_p: SwapMode = SwapMode.NO,
     diagnostic: bool = False,
     swap_verbose: bool = True,
 ) -> bytes:
@@ -99,13 +98,12 @@ def mame_dir_to_neo(
 
     Parameters
     ----------
-    swap_p : False  → no swap (default)
-             True   → always swap
-             "auto" → heuristic detection via :func:`detect_swap_p_needed`
-             The CLI ``pack`` subcommand and GUI use ``"auto"`` by default; pass
-             ``swap_p="auto"`` here for the same behaviour.
+    swap_p
+        :attr:`SwapMode.NO` (default), :attr:`SwapMode.YES`, or
+        :attr:`SwapMode.AUTO` (heuristic via :func:`detect_swap_p_needed`).
+        The CLI ``pack`` subcommand and GUI pass ``SwapMode.AUTO`` by default.
     swap_verbose
-        If True (default), print auto-detect diagnostics for ``swap_p="auto"``.
+        If True (default), print auto-detect diagnostics for ``SwapMode.AUTO``.
     """
     romset = parse_mame_dir(dir_path, diagnostic=diagnostic)
     romset = apply_swap_p(romset, swap_p, verbose=swap_verbose)
