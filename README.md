@@ -512,7 +512,11 @@ For hacks and CD conversions, MAME `verifyroms` may report CRC mismatches becaus
 
 #### Out of scope
 
-- Caching MD5 checksums inside `NeoMeta.format_info()` for repeated calls on large ROM sets: negligible benefit for typical CLI or GUI use, so it is not planned.
+- **`detect-swap` on `.neo` files:** not useful — the P-ROM swap is applied during `pack` and already encoded in the `.neo` payload. There is nothing left to detect.
+- **`verify` CLI subcommand:** `verify_roundtrip` exists in `neoconv.core` as a testing utility. Exposing it as a CLI command would only confirm that neoconv round-trips its own output correctly, which is covered by the test suite. It is not a user-facing feature.
+- **Directory traversal deeper than one level** in `pack`: the one-level limit (top-level files + one subdirectory) covers all known MAME unzip layouts. Recursive traversal would risk picking up unrelated files from nested archives or build artefacts.
+- **Automatic merging of split C chips** (`c1a`+`c1b` style): see [FBNeo compatibility](#fbneo-compatibility).
+- **FBNeo as a separate input format:** FBNeo Neo Geo sets use the same naming conventions as MAME and are supported out of the box — see [FBNeo compatibility](#fbneo-compatibility).
 
 ---
 
