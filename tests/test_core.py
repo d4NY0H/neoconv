@@ -26,6 +26,7 @@ from neoconv.core import (
     name_to_role,
     roles_to_romset,
     build_neo,
+    extract_neo,
     extract_neo_to_zip,
     extract_romset,
     extract_romset_to_zip,
@@ -1010,3 +1011,148 @@ class TestPackPreflight:
         from neoconv.core import collect_pack_sequence_issues
 
         assert collect_pack_sequence_issues(["game-v1.bin", "game-v2.bin"]) == []
+
+
+# ---------------------------------------------------------------------------
+# End-to-end roundtrip tests
+# ---------------------------------------------------------------------------
+
+class TestEndToEndRoundtrip:
+    """
+    Full pipeline tests: build_neo -> extract_neo_to_zip -> parse_mame_zip
+    -> build_neo -> verify_roundtrip.
+
+    These catch regressions that unit tests on individual steps cannot:
+    interleave/de-interleave symmetry across the full stack, header
+    serialisation, and ZIP packing/parsing consistency.
+    """
+
+    def _make_meta(self) -> NeoMeta:
+        return NeoMeta(name="RoundtripGame", manufacturer="SNK", year=1995, ngh=99, genre=9)
+
+    def test_roundtrip_mame_zip(self, tmp_path):
+        """build_neo -> extract to MAME ZIP -> parse_mame_zip -> build_neo -> identical ROM data."""
+        meta = self._make_meta()
+        romset = make_romset()
+        original_neo = build_neo(romset, meta)
+
+        # Extract to a MAME ZIP in memory, write it so parse_mame_zip can read it
+        zip_bytes = extract_neo_to_zip(original_neo, name_prefix="rtrip", fmt="mame")
+        zip_path = tmp_path / "rtrip.zip"
+        zip_path.write_bytes(zip_bytes)
+
+        # Re-parse and rebuild
+        reparsed = parse_mame_zip(zip_path)
+        rebuilt_neo = build_neo(reparsed, meta)
+
+        result = verify_roundtrip(original_neo, rebuilt_neo)
+        assert result.ok, f"Roundtrip failed: {result.details}"
+
+    def test_roundtrip_mame_dir(self, tmp_path):
+        """build_neo -> extract to directory -> parse_mame_dir -> build_neo -> identical ROM data."""
+        meta = self._make_meta()
+        romset = make_romset()
+        original_neo = build_neo(romset, meta)
+
+        out_dir = tmp_path / "roms"
+        extract_neo(original_neo, out_dir, name_prefix="rtrip", fmt="mame")
+
+        reparsed = parse_mame_dir(out_dir)
+        rebuilt_neo = build_neo(reparsed, meta)
+
+        result = verify_roundtrip(original_neo, rebuilt_neo)
+        assert result.ok, f"Roundtrip failed: {result.details}"
+
+    def test_roundtrip_darksoft_zip(self, tmp_path):
+        """Same pipeline with Darksoft (.rom) naming."""
+        meta = self._make_meta()
+        romset = make_romset()
+        original_neo = build_neo(romset, meta)
+
+        zip_bytes = extract_neo_to_zip(original_neo, name_prefix="rtrip", fmt="darksoft")
+        zip_path = tmp_path / "rtrip_ds.zip"
+        zip_path.write_bytes(zip_bytes)
+
+        reparsed = parse_mame_zip(zip_path)
+        rebuilt_neo = build_neo(reparsed, meta)
+
+        result = verify_roundtrip(original_neo, rebuilt_neo)
+        assert result.ok, f"Darksoft roundtrip failed: {result.details}"
+
+    def test_roundtrip_multi_v_and_c(self, tmp_path):
+        """Roundtrip with multiple V banks and C chip pairs (4 chips total)."""
+        meta = self._make_meta()
+        c1, c2, c3, c4 = (make_rom(C_BANK_SIZE, b) for b in (0x11, 0x22, 0x33, 0x44))
+        romset = RomSet(
+            p=make_rom(1024 * 1024, 0xAA),
+            s=make_rom(128 * 1024, 0xBB),
+            m=make_rom(128 * 1024, 0xCC),
+            v=make_rom(4 * 1024 * 1024, 0xDD),   # two 2 MB V banks
+            c=interleave_c_chips([c1, c2, c3, c4]),
+        )
+        original_neo = build_neo(romset, meta)
+
+        zip_bytes = extract_neo_to_zip(original_neo, name_prefix="rtrip", fmt="mame")
+        zip_path = tmp_path / "rtrip_multi.zip"
+        zip_path.write_bytes(zip_bytes)
+
+        reparsed = parse_mame_zip(zip_path)
+        rebuilt_neo = build_neo(reparsed, meta)
+
+        result = verify_roundtrip(original_neo, rebuilt_neo)
+        assert result.ok, f"Multi V/C roundtrip failed: {result.details}"
+
+    def test_roundtrip_no_v_no_c(self, tmp_path):
+        """Edge case: ROM set with no V and no C data (e.g. puzzle/mahjong titles)."""
+        meta = self._make_meta()
+        romset = RomSet(
+            p=make_rom(512 * 1024, 0xAA),
+            s=make_rom(128 * 1024, 0xBB),
+            m=make_rom(128 * 1024, 0xCC),
+            v=b"",
+            c=b"",
+        )
+        original_neo = build_neo(romset, meta)
+
+        zip_bytes = extract_neo_to_zip(original_neo, name_prefix="rtrip", fmt="mame")
+        zip_path = tmp_path / "rtrip_novc.zip"
+        zip_path.write_bytes(zip_bytes)
+
+        reparsed = parse_mame_zip(zip_path)
+        rebuilt_neo = build_neo(reparsed, meta)
+
+        result = verify_roundtrip(original_neo, rebuilt_neo)
+        assert result.ok, f"No-V/C roundtrip failed: {result.details}"
+
+    def test_swap_p_roundtrip(self, tmp_path):
+        """Swapping P-ROM and then re-swapping must reproduce the original."""
+        meta = self._make_meta()
+        p_orig = make_rom(P_SWAP_SIZE // 2, 0xAA) + make_rom(P_SWAP_SIZE // 2, 0xBB)
+        romset = RomSet(
+            p=p_orig,
+            s=make_rom(128 * 1024, 0xBB),
+            m=make_rom(128 * 1024, 0xCC),
+            v=make_rom(2 * 1024 * 1024, 0xDD),
+            c=interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE)]),
+        )
+        # swap once -> swap again -> must be identical to original
+        from neoconv.core import swap_p_banks
+        swapped = swap_p_banks(p_orig)
+        assert swapped != p_orig
+        assert swap_p_banks(swapped) == p_orig
+
+        # Full neo roundtrip with swap applied
+        from neoconv.core import apply_swap_p
+        import dataclasses
+        rs_swapped = apply_swap_p(romset, True, verbose=False)
+        original_neo = build_neo(rs_swapped, meta)
+
+        zip_bytes = extract_neo_to_zip(original_neo, name_prefix="rtrip", fmt="mame")
+        zip_path = tmp_path / "rtrip_swap.zip"
+        zip_path.write_bytes(zip_bytes)
+
+        reparsed = parse_mame_zip(zip_path)
+        rebuilt_neo = build_neo(reparsed, meta)
+
+        result = verify_roundtrip(original_neo, rebuilt_neo)
+        assert result.ok, f"Swap roundtrip failed: {result.details}"
