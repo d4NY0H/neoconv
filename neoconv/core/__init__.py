@@ -73,7 +73,7 @@ from .mame_parse import (
     parse_mame_zip,
     roles_to_romset,
 )
-from .models import NeoMeta, RomSet
+from .models import NeoMeta, RomSet, SwapMode
 from .neo_format import (
     build_neo,
     parse_neo,
@@ -96,6 +96,7 @@ __all__ = [
     "V_BANK_SIZE",
     "NeoMeta",
     "RomSet",
+    "SwapMode",
     "VerifyResult",
     "apply_swap_p",
     "build_neo",
