@@ -399,6 +399,16 @@ Standard BIOS files (`000-lo.lo`, `sfix.sfix`, etc.) are ignored. Unknown files 
 
 ### Extract: C and V ROM sizing
 
+#### Why you need to specify chip sizes at all
+
+The `.neo` header stores only the **total byte count** for the C-ROM block and the V-ROM block — it does not record how many chips those blocks were split across, or how large each individual chip was. That information existed in the original MAME ROM set but is lost when the files are merged into the `.neo` container.
+
+When **neoconv** extracts, it must re-split those blocks into individual files. The split is purely mechanical — any size that divides the total evenly is accepted without error. The question is only whether the resulting files **match what MAME or Darksoft expect**.
+
+For example, 8 MB of C-ROM data could legitimately be split as `c1(4 MB)+c2(4 MB)` or as `c1(2 MB)+c2(2 MB)+c3(2 MB)+c4(2 MB)`. Both extractions succeed, but only one matches the MAME `neogeo.xml` entry for that title. Using the wrong split means MAME's ROM verification (`verifyroms`) will report missing or mismatched files. The ROM data itself is intact — if you correct the XML to match the actual file layout, the game will run.
+
+The **2 MB default covers the majority of titles**. Always cross-check against the MAME `neogeo.xml` or FBNeo ROM database for any title you are unsure about.
+
 #### Common extract sizes (CLI bytes)
 
 The CLI flags `--c-chip-size` and `--v-bank-size` take **bytes** (not megabytes). The GUI dropdown labels use MB/KB; values map to the same byte counts.
