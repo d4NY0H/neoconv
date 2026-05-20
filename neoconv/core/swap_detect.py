@@ -41,6 +41,10 @@ def _word_swap(data: bytes) -> bytes:
 
     *data* must have an even length (16-bit word aligned); odd lengths raise
     :class:`ValueError`.
+
+    Note: callers always pass at most 8 bytes (the vector table prefix from
+    ``check_m68k_vectors``), so the loop is trivially short. Vectorised
+    alternatives (e.g. numpy, struct) are not worth the complexity here.
     """
     n = len(data)
     if n % 2 != 0:
