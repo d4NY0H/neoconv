@@ -10,13 +10,25 @@ import os
 import queue
 import sys
 import threading
-import tkinter as tk
 import warnings
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, scrolledtext, ttk
+except ImportError as _tk_err:  # pragma: no cover
+    raise SystemExit(
+        "neoconv-gui requires tkinter, which is not available in this Python\n"
+        "installation.\n"
+        "  \u2022 Debian/Ubuntu : sudo apt install python3-tk\n"
+        "  \u2022 Fedora        : sudo dnf install python3-tkinter\n"
+        "  \u2022 macOS (Homebrew): brew install python-tk\n"
+        "  \u2022 Windows       : reinstall Python and tick 'tcl/tk and IDLE'\n"
+        f"(Original error: {_tk_err})"
+    ) from None
 
 from . import __version__
 from .core import (
@@ -1348,7 +1360,7 @@ class InfoTab(ttk.Frame):
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main():
+def main() -> None:  # pragma: no cover
     app = NeoConvApp()
     app.mainloop()
 
