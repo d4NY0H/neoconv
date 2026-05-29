@@ -33,8 +33,8 @@ except ImportError as _tk_err:  # pragma: no cover
 from . import __version__
 from .core import (
     C_CHIP_SIZE_DEFAULT,
-    GENRE_BY_NAME,
     GENRES,
+    resolve_genre,
     V_BANK_SIZE,
     NEO_HEADER_SIZE,
     NeoMeta,
@@ -46,7 +46,6 @@ from .core import (
     collect_pack_psm_roles_for_validation,
     collect_pack_sequence_issues,
     iter_mame_dir_rom_files,
-    detect_swap_p_needed,
     extract_romset,
     extract_romset_to_zip,
     warn_overwriting_path,
@@ -880,12 +879,17 @@ class PackTab(ttk.Frame):
         except ValueError:
             messagebox.showerror("Error", "Year, NGH and Screenshot must be integers.")
             return
+        try:
+            genre_id = resolve_genre(self._genre.get())
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+            return
 
         meta = NeoMeta(
             name=self._vars["name"].get(),
             manufacturer=self._vars["mfr"].get(),
             year=year,
-            genre=GENRE_BY_NAME.get(self._genre.get().lower(), 0),
+            genre=genre_id,
             ngh=ngh,
             screenshot=screenshot,
         )
@@ -914,22 +918,22 @@ class PackTab(ttk.Frame):
                 fn_parse = parse_mame_dir if src.is_dir() else parse_mame_zip
 
                 if swap_p is SwapMode.AUTO:
-                    # Parse once, reuse the RomSet for swap-detection AND build.
-                    # Avoids a second full parse of potentially 100+ MB C-ROM data.
+                    # Parse once, then apply_swap_p (single detect pass) and build.
                     with warnings.catch_warnings(record=True) as wprobe:
                         warnings.simplefilter("always")
                         rs_probe = fn_parse(src, diagnostic=diagnostic)
                     pack_warnings.extend(wprobe)
-
-                    needed, reason = detect_swap_p_needed(rs_probe.p)
-                    tag = "auto-swap: YES -" if needed else "auto-swap: no -"
-                    self._wbridge.post_log(f"  {tag} {reason}")
                     if self._cancel_event.is_set():
                         raise UserCancelledError("Operation cancelled by user.")
 
                     with warnings.catch_warnings(record=True) as caught:
                         warnings.simplefilter("always")
-                        romset = apply_swap_p(rs_probe, SwapMode.AUTO, verbose=False)
+                        romset = apply_swap_p(
+                            rs_probe,
+                            SwapMode.AUTO,
+                            verbose=True,
+                            log=self._wbridge.post_log,
+                        )
                         neo_data = build_neo(romset, meta)
                     pack_warnings.extend(caught)
                 else:
@@ -1023,6 +1027,12 @@ class PackTab(ttk.Frame):
             return
         if not self._vars["mfr"].get().strip():
             self._set_status("warn", "manufacturer is empty")
+            return
+
+        try:
+            resolve_genre(self._genre.get())
+        except ValueError as e:
+            self._set_status("error", str(e))
             return
 
         src_key = self._source_key(src)
@@ -1259,7 +1269,11 @@ class EditTab(ttk.Frame):
                 "Error", "Year, NGH and Screenshot must be integers."
             )
             return
-        genre_id = GENRE_BY_NAME.get(self._genre.get().lower(), 0)
+        try:
+            genre_id = resolve_genre(self._genre.get())
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+            return
         out_raw = self._out.value.strip()
         dest = Path(out_raw) if out_raw else inp
 

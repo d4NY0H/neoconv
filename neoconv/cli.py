@@ -39,7 +39,6 @@ from .core import (
     C_CHIP_SIZE_DEFAULT,
     V_BANK_SIZE,
     GENRES,
-    GENRE_BY_NAME,
     NeoConvError,
     NeoMeta,
     RomSet,
@@ -54,6 +53,7 @@ from .core import (
     parse_mame_zip,
     parse_neo,
     replace_neo_metadata,
+    resolve_genre,
     warn_overwriting_path,
     write_bytes_atomic,
 )
@@ -63,34 +63,15 @@ from .core import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_genre(value: str) -> int:
-    """Convert a genre name or numeric id string to its integer id.
-
-    Raises :class:`ValueError` for unrecognised values so callers (including
-    tests) can catch it without having to intercept ``sys.exit``.
-    """
-    try:
-        n = int(value)
-        if n not in GENRES:
-            raise ValueError(f"genre id {n} is not valid")
-        return n
-    except ValueError:
-        key = value.lower()
-        if key not in GENRE_BY_NAME:
-            valid = ", ".join(GENRES.values())
-            raise ValueError(f"unknown genre '{value}'. Valid genres: {valid}")
-        return GENRE_BY_NAME[key]
-
-
 def _genre_type(value: str) -> int:
     """argparse ``type=`` adapter for ``--genre``.
 
-    Wraps :func:`_resolve_genre` and converts :class:`ValueError` to
+    Wraps :func:`resolve_genre` and converts :class:`ValueError` to
     :class:`argparse.ArgumentTypeError` so argparse prints a clean usage
     error instead of a traceback.
     """
     try:
-        return _resolve_genre(value)
+        return resolve_genre(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 

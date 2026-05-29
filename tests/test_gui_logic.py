@@ -7,6 +7,8 @@ from __future__ import annotations
 import tkinter as tk
 import zipfile
 
+import pytest
+
 from neoconv import gui
 from neoconv.core import InvalidNeoError
 
@@ -109,6 +111,13 @@ def test_set_controls_state_toggles_widget():
     assert w.state == "disabled"
     gui._set_controls_state([w], True)
     assert w.state == "normal"
+
+
+def test_resolve_genre_rejects_unknown_label():
+    from neoconv.core import resolve_genre
+
+    with pytest.raises(ValueError, match="unknown genre"):
+        resolve_genre("NotARealGenre")
 
 
 def test_format_neoconv_error_includes_hint():

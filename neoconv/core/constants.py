@@ -39,3 +39,23 @@ GENRES = {
     10: "Puzzle",
 }
 GENRE_BY_NAME = {v.lower(): k for k, v in GENRES.items()}
+
+
+def resolve_genre(value: str) -> int:
+    """
+    Convert a genre display name or numeric id string to its integer id.
+
+    Raises :class:`ValueError` when *value* is not a known name or valid id.
+    """
+    value = value.strip()
+    try:
+        n = int(value)
+        if n not in GENRES:
+            raise ValueError(f"genre id {n} is not valid")
+        return n
+    except ValueError:
+        key = value.lower()
+        if key not in GENRE_BY_NAME:
+            valid = ", ".join(GENRES.values())
+            raise ValueError(f"unknown genre '{value}'. Valid genres: {valid}") from None
+        return GENRE_BY_NAME[key]

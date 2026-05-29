@@ -800,6 +800,13 @@ class TestSwapPBanks:
         with pytest.raises(InvalidConfigurationError, match="2 MB"):
             swap_p_banks(make_rom(4 * 1024 * 1024))  # 4 MB — too large
 
+    def test_apply_swap_p_auto_logs_via_callback(self):
+        lines: list[str] = []
+        p = _make_2mb_p_rom(valid_in_first=False)
+        rs = RomSet(p=p, s=b"", m=b"", v=b"", c=b"")
+        apply_swap_p(rs, SwapMode.AUTO, verbose=True, log=lines.append)
+        assert any("auto-swap: YES" in line for line in lines)
+
 
 # ---------------------------------------------------------------------------
 # diagnostic mode

@@ -302,22 +302,26 @@ def test_cmd_info(monkeypatch, tmp_path, capsys):
 
 
 def test_resolve_genre_other_and_numeric():
-    from neoconv.core import GENRES
+    from neoconv.core import GENRES, resolve_genre
 
     other_id = next(k for k, v in GENRES.items() if v == "Other")
-    assert cli._resolve_genre("Other") == other_id
-    assert cli._resolve_genre("other") == other_id
-    assert cli._resolve_genre(str(other_id)) == other_id
+    assert resolve_genre("Other") == other_id
+    assert resolve_genre("other") == other_id
+    assert resolve_genre(str(other_id)) == other_id
 
 
-def test_resolve_genre_unknown_string_raises(monkeypatch):
+def test_resolve_genre_unknown_string_raises():
+    from neoconv.core import resolve_genre
+
     with pytest.raises(ValueError, match="not_a_real_genre_label"):
-        cli._resolve_genre("not_a_real_genre_label")
+        resolve_genre("not_a_real_genre_label")
 
 
-def test_resolve_genre_numeric_not_in_genre_table_raises(monkeypatch):
+def test_resolve_genre_numeric_not_in_genre_table_raises():
+    from neoconv.core import resolve_genre
+
     with pytest.raises(ValueError, match="99999"):
-        cli._resolve_genre("99999")
+        resolve_genre("99999")
 
 
 def test_print_neo_info_uses_parse_neo(monkeypatch, capsys):
