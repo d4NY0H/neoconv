@@ -8,6 +8,7 @@ import tkinter as tk
 import zipfile
 
 from neoconv import gui
+from neoconv.core import InvalidNeoError
 
 
 def test_enforce_latin1_byte_limit_truncates_hard():
@@ -108,3 +109,9 @@ def test_set_controls_state_toggles_widget():
     assert w.state == "disabled"
     gui._set_controls_state([w], True)
     assert w.state == "normal"
+
+
+def test_format_neoconv_error_includes_hint():
+    exc = InvalidNeoError("bad header", hint="check file size")
+    assert gui._format_neoconv_error(exc) == "bad header — check file size"
+    assert gui._format_neoconv_error(InvalidNeoError("only message")) == "only message"

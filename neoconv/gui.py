@@ -169,15 +169,19 @@ class _GuiWorkerBridge:
             self._after_id = None
 
 
+def _format_neoconv_error(exc: NeoConvError) -> str:
+    msg = str(exc)
+    if exc.hint:
+        msg = f"{msg} — {exc.hint}"
+    return msg
+
+
 def _post_worker_error(wbridge: _GuiWorkerBridge, exc: BaseException) -> None:
     if isinstance(exc, UserCancelledError):
         wbridge.post_log("[INFO] Operation cancelled.")
         return
     if isinstance(exc, NeoConvError):
-        msg = str(exc)
-        if exc.hint:
-            msg = f"{msg} — {exc.hint}"
-        wbridge.post_log(f"[ERROR] {msg}")
+        wbridge.post_log(f"[ERROR] {_format_neoconv_error(exc)}")
         return
     wbridge.post_log(f"[ERROR] {exc}")
 
@@ -1221,7 +1225,12 @@ class EditTab(ttk.Frame):
             with path.open("rb") as f:
                 hdr = f.read(NEO_HEADER_SIZE)
             meta = parse_neo_header_metadata(hdr)
-        except (OSError, ValueError):
+        except OSError:
+            return
+        except NeoConvError as e:
+            self._log.append(
+                f"[WARN] Could not load metadata from header: {_format_neoconv_error(e)}"
+            )
             return
         self._suppress_meta_fill = True
         try:
@@ -1356,8 +1365,8 @@ class InfoTab(ttk.Frame):
             romset   = parse_neo(neo_data)
             self._log.append(f"File : {neo_path}")
             self._log.append(romset.meta.format_info(romset))
-        except ValueError as e:
-            self._log.append(f"[ERROR] Invalid .neo file: {e}")
+        except NeoConvError as e:
+            self._log.append(f"[ERROR] {_format_neoconv_error(e)}")
         except OSError as e:
             self._log.append(f"[ERROR] Could not read file: {e}")
         except MemoryError as e:
