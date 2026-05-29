@@ -14,6 +14,9 @@ import pytest
 
 from neoconv.core import (
     C_BANK_SIZE,
+    InvalidConfigurationError,
+    InvalidNeoError,
+    InvalidRomLayoutError,
     NEO_HEADER_SIZE,
     NEO_MAGIC,
     GENRES,
@@ -166,15 +169,15 @@ class TestCRomInterleaving:
     def test_wrong_chip_size_raises(self):
         """chip_size that doesn't divide C evenly should raise."""
         rs = RomSet(c=make_rom(C_BANK_SIZE * 2, 0xFF))
-        with pytest.raises(ValueError, match="not a multiple"):
+        with pytest.raises(InvalidConfigurationError, match="not a multiple"):
             rs.c_chips(chip_size=C_BANK_SIZE + 1)
 
     def test_size_mismatch_raises(self):
-        with pytest.raises(ValueError, match="size mismatch"):
+        with pytest.raises(InvalidRomLayoutError, match="size mismatch"):
             interleave_c_chips([make_rom(C_BANK_SIZE), make_rom(C_BANK_SIZE // 2)])
 
     def test_odd_chip_count_raises(self):
-        with pytest.raises(ValueError, match="[Oo]dd"):
+        with pytest.raises(InvalidRomLayoutError, match="[Oo]dd"):
             roles_to_romset({
                 "P": make_rom(512 * 1024),
                 "S": make_rom(128 * 1024),
@@ -189,7 +192,7 @@ class TestCRomInterleaving:
             "S": make_rom(128 * 1024),
             "M": make_rom(128 * 1024),
         }
-        with pytest.raises(ValueError, match="gap in V ROM"):
+        with pytest.raises(InvalidRomLayoutError, match="gap in V ROM"):
             roles_to_romset({**base, "V1": make_rom(128 * 1024), "V3": make_rom(128 * 1024)})
 
     def test_c_rom_gap_raises(self):
@@ -198,7 +201,7 @@ class TestCRomInterleaving:
             "S": make_rom(128 * 1024),
             "M": make_rom(128 * 1024),
         }
-        with pytest.raises(ValueError, match="gap in C ROM"):
+        with pytest.raises(InvalidRomLayoutError, match="gap in C ROM"):
             roles_to_romset({
                 **base,
                 "C1": make_rom(C_BANK_SIZE),
@@ -252,19 +255,19 @@ class TestBuildParseNeo:
         assert parsed.c == rs.c
 
     def test_invalid_magic_raises(self):
-        with pytest.raises(ValueError, match="Not a valid .neo"):
+        with pytest.raises(InvalidNeoError, match="Not a valid .neo"):
             parse_neo(b"BAD!" + bytes(NEO_HEADER_SIZE))
 
     def test_truncated_file_raises(self):
         rs = make_romset()
         neo = make_neo(rs)
-        with pytest.raises(ValueError):
+        with pytest.raises(InvalidNeoError):
             parse_neo(neo[:-100])  # truncate last 100 bytes
 
     def test_file_shorter_than_header_raises(self):
         data = NEO_MAGIC + b"\x00" * 64
         assert len(data) < NEO_HEADER_SIZE
-        with pytest.raises(ValueError, match="too small"):
+        with pytest.raises(InvalidNeoError, match="too small"):
             parse_neo(data)
 
     def test_parse_neo_appends_optional_v2_region(self):
@@ -307,7 +310,7 @@ class TestNeoMetadataEdit:
         assert quick == parse_neo(neo).meta
 
     def test_parse_neo_header_metadata_too_short(self):
-        with pytest.raises(ValueError, match="too small"):
+        with pytest.raises(InvalidNeoError, match="too small"):
             parse_neo_header_metadata(NEO_MAGIC + b"\x00" * 64)
 
     def test_replace_neo_metadata_rom_regions_unchanged(self):
@@ -412,7 +415,7 @@ class TestCoreEdgeCases:
     def test_word_swap_odd_length_raises(self):
         from neoconv.core.swap_detect import _word_swap
 
-        with pytest.raises(ValueError, match="even byte length"):
+        with pytest.raises(InvalidConfigurationError, match="even byte length"):
             _word_swap(b"\x00\x01\x02")
         assert _word_swap(b"\x12\x34") == b"\x34\x12"
         assert _word_swap(b"") == b""
@@ -420,7 +423,7 @@ class TestCoreEdgeCases:
     def test_parse_mame_zip_rejects_corrupt_archive(self, tmp_path):
         bad = tmp_path / "bad.zip"
         bad.write_bytes(b"\xffNOT_A_ZIP\xff")
-        with pytest.raises(ValueError, match="Cannot open ZIP"):
+        with pytest.raises(InvalidRomLayoutError, match="Cannot open ZIP"):
             parse_mame_zip(bad)
 
     def test_parse_mame_zip_diagnostic_warns_on_unknown_files(self, tmp_path):
@@ -523,7 +526,7 @@ class TestCoreEdgeCases:
         assert len(rs.s) == 0x20000
 
     def testroles_to_romset_without_filenames_still_requires_physical_s(self):
-        with pytest.raises(ValueError, match="S"):
+        with pytest.raises(InvalidRomLayoutError, match="S"):
             roles_to_romset(
                 {
                     "P": b"x" * 4096,
@@ -595,7 +598,7 @@ class TestVRomChunking:
         assert all(len(c) == four_mb for c in chunks)
 
     def test_v_chunks_invalid_bank_size_raises(self):
-        with pytest.raises(ValueError, match="positive"):
+        with pytest.raises(InvalidConfigurationError, match="positive"):
             RomSet(v=b"x").v_chunks(bank_size=0)
 
     def test_extract_zip_uses_v_bank_size(self):
@@ -790,11 +793,11 @@ class TestSwapPBanks:
         assert swap_p_banks(swap_p_banks(p_rom)) == p_rom
 
     def test_wrong_size_raises(self):
-        with pytest.raises(ValueError, match="2 MB"):
+        with pytest.raises(InvalidConfigurationError, match="2 MB"):
             swap_p_banks(make_rom(1024 * 1024))  # 1 MB — too small
 
     def test_wrong_size_4mb_raises(self):
-        with pytest.raises(ValueError, match="2 MB"):
+        with pytest.raises(InvalidConfigurationError, match="2 MB"):
             swap_p_banks(make_rom(4 * 1024 * 1024))  # 4 MB — too large
 
 
@@ -809,7 +812,7 @@ class TestDiagnosticMode:
         # Intentionally omit p1/s1/m1 to verify actionable error text.
         (tmp_path / "readme.txt").write_bytes(b"hello")
 
-        with pytest.raises(ValueError) as exc:
+        with pytest.raises(InvalidRomLayoutError) as exc:
             parse_mame_dir(tmp_path, diagnostic=False)
 
         msg = str(exc.value)
@@ -864,7 +867,7 @@ class TestDiagnosticMode:
         (tmp_path / "game-s1.bin").write_bytes(make_rom(128 * 1024))
         (tmp_path / "game-m1.bin").write_bytes(make_rom(128 * 1024))
 
-        with pytest.raises(ValueError, match="Duplicate ROM role"):
+        with pytest.raises(InvalidRomLayoutError, match="Duplicate ROM role"):
             parse_mame_dir(tmp_path, diagnostic=False)
 
     def test_duplicate_role_in_zip_raises(self, tmp_path):
@@ -877,7 +880,7 @@ class TestDiagnosticMode:
             zf.writestr("game-s1.bin", make_rom(128 * 1024))
             zf.writestr("game-m1.bin", make_rom(128 * 1024))
 
-        with pytest.raises(ValueError, match="Duplicate ROM role"):
+        with pytest.raises(InvalidRomLayoutError, match="Duplicate ROM role"):
             parse_mame_zip(zip_path, diagnostic=False)
 
 

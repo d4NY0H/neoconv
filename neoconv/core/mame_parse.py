@@ -13,6 +13,7 @@ from .constants import (
     _RE_SYNTH_S_KF10_BOOTLEG,
     _SYNTH_S_MAME_512K_SET_IDS,
 )
+from .exceptions import InvalidRomLayoutError
 from .interleave import interleave_c_chips
 from .models import RomSet
 
@@ -243,7 +244,8 @@ def roles_to_romset(
 ) -> RomSet:
     """
     Build a RomSet from a dict mapping role strings to raw bytes.
-    Raises ValueError for missing mandatory ROMs or malformed C chip counts.
+    Raises :class:`~neoconv.core.InvalidRomLayoutError` for missing mandatory
+    ROMs or malformed C chip counts.
 
     When ``source_filenames`` is provided (ZIP member paths or directory
     basenames), boards without a physical s1 ROM may receive a zero-filled
@@ -259,7 +261,7 @@ def roles_to_romset(
             "M": "M ROM missing (expected m1, e.g. game-m1.bin or game.m1)",
         }
         tips = "; ".join(tips_by_role[r] for r in missing)
-        raise ValueError(
+        raise InvalidRomLayoutError(
             f"Missing mandatory ROM(s) in {source or 'input'}: "
             f"{', '.join(missing)}. "
             f"Quick tips: {tips}. "
@@ -276,7 +278,7 @@ def roles_to_romset(
         if chunk:
             v_rom += chunk
         elif any(roles.get(f"V{j}") for j in range(i + 1, 9)):
-            raise ValueError(
+            raise InvalidRomLayoutError(
                 f"V{i} ROM missing but higher-numbered V chips are present "
                 f"(gap in V ROM sequence). This is likely a naming error. "
                 f"Expected e.g. game-v{i}.bin or game.v{i}."
@@ -288,14 +290,14 @@ def roles_to_romset(
         if chip:
             c_chips_raw.append(chip)
         elif any(roles.get(f"C{j}") for j in range(i + 1, 17)):
-            raise ValueError(
+            raise InvalidRomLayoutError(
                 f"C{i} ROM missing but higher-numbered C chips are present "
                 f"(gap in C ROM sequence). This is likely a naming error. "
                 f"Expected e.g. game-c{i}.bin or game.c{i}."
             )
 
     if c_chips_raw and len(c_chips_raw) % 2 != 0:
-        raise ValueError(
+        raise InvalidRomLayoutError(
             f"Odd number of C chips ({len(c_chips_raw)}) in {source or 'input'}. "
             "C chips must come in pairs (c1+c2, c3+c4, ...)."
         )
@@ -304,11 +306,11 @@ def roles_to_romset(
     for i in range(0, len(c_chips_raw), 2):
         a, b = c_chips_raw[i], c_chips_raw[i + 1]
         if len(a) != len(b):
-            raise ValueError(
+            raise InvalidRomLayoutError(
                 f"C chip pair c{i+1}/c{i+2} size mismatch: {len(a)} vs {len(b)} bytes."
             )
         if len(a) % (512 * 1024) != 0:
-            raise ValueError(
+            raise InvalidRomLayoutError(
                 f"C chip c{i+1} size ({len(a):,} bytes) is not a multiple of 512 KB. "
                 "The ROM data may be corrupt or incorrectly split."
             )
@@ -326,7 +328,7 @@ def _store_role_data(
 ) -> None:
     """Store role data, rejecting duplicate role mappings."""
     if role in roles:
-        raise ValueError(
+        raise InvalidRomLayoutError(
             f"Duplicate ROM role '{role}' in input: '{source_name}'. "
             "Each role (P/S/M/Vx/Cx) must map to exactly one file."
         )
@@ -359,7 +361,7 @@ def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
                 else:
                     ignored.append(entry.filename)
     except zipfile.BadZipFile as e:
-        raise ValueError(f"Cannot open ZIP file '{zip_path}': {e}") from e
+        raise InvalidRomLayoutError(f"Cannot open ZIP file '{zip_path}': {e}") from e
 
     if diagnostic and ignored:
         for fn in ignored:

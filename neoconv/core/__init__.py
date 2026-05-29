@@ -73,6 +73,13 @@ from .mame_parse import (
     parse_mame_zip,
     roles_to_romset,
 )
+from .exceptions import (
+    InvalidConfigurationError,
+    InvalidNeoError,
+    InvalidRomLayoutError,
+    NeoConvError,
+    UserCancelledError,
+)
 from .models import NeoMeta, RomSet, SwapMode
 from .neo_format import (
     build_neo,
@@ -94,9 +101,14 @@ __all__ = [
     "NEO_MAGIC",
     "P_SWAP_SIZE",
     "V_BANK_SIZE",
+    "InvalidConfigurationError",
+    "InvalidNeoError",
+    "InvalidRomLayoutError",
+    "NeoConvError",
     "NeoMeta",
     "RomSet",
     "SwapMode",
+    "UserCancelledError",
     "VerifyResult",
     "apply_swap_p",
     "build_neo",

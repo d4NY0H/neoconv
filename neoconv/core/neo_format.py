@@ -9,15 +9,16 @@ from pathlib import Path
 from typing import Optional
 
 from .constants import NEO_HEADER_SIZE, NEO_MAGIC
+from .exceptions import InvalidNeoError
 from .models import NeoMeta, RomSet
 
 
 def _meta_from_neo_header_prefix(data: bytes) -> NeoMeta:
     """Parse ``NeoMeta`` from the first ``NEO_HEADER_SIZE`` bytes of a .neo file."""
     if len(data) < NEO_HEADER_SIZE:
-        raise ValueError("File too small to be a valid .neo container.")
+        raise InvalidNeoError("File too small to be a valid .neo container.")
     if data[:4] != NEO_MAGIC:
-        raise ValueError(
+        raise InvalidNeoError(
             f"Not a valid .neo file (magic={data[:4]!r}, expected {NEO_MAGIC!r})"
         )
     year = struct.unpack_from("<H", data, 0x1C)[0]
@@ -59,7 +60,7 @@ def parse_neo(data: bytes) -> RomSet:
 
     expected = NEO_HEADER_SIZE + p_size + s_size + m_size + v1_size + v2_size + c_size
     if len(data) != expected:
-        raise ValueError(
+        raise InvalidNeoError(
             f"File size mismatch: got {len(data)}, expected {expected}. "
             "The .neo file may be corrupt or truncated."
         )
@@ -160,9 +161,9 @@ def replace_neo_metadata(
     splitting the file into a :class:`RomSet` (avoids large temporary copies).
     """
     if len(neo_data) < NEO_HEADER_SIZE:
-        raise ValueError("File too small to be a valid .neo container.")
+        raise InvalidNeoError("File too small to be a valid .neo container.")
     if neo_data[:4] != NEO_MAGIC:
-        raise ValueError(
+        raise InvalidNeoError(
             f"Not a valid .neo file (magic={neo_data[:4]!r}, expected {NEO_MAGIC!r})"
         )
 
@@ -175,7 +176,7 @@ def replace_neo_metadata(
 
     expected = NEO_HEADER_SIZE + p_size + s_size + m_size + v1_size + v2_size + c_size
     if len(neo_data) != expected:
-        raise ValueError(
+        raise InvalidNeoError(
             f"File size mismatch: got {len(neo_data)}, expected {expected}. "
             "The .neo file may be corrupt or truncated."
         )

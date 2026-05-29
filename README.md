@@ -342,6 +342,22 @@ Background on pack/extract behaviour, ROM naming, and the on-disk `.neo` layout.
 | [P-ROM swap](#p-rom-bank-swap---swap-p) | `--swap-p` / auto-detect |
 | [`.neo` format](#neo-container-format) | Header layout, V1/V2 fields |
 | [Notes](#notes) | CRC mismatches, out-of-scope items |
+| [Errors](#errors-library-api) | `NeoConvError` hierarchy for library callers |
+
+---
+
+### Errors (library API)
+
+Expected failures from `neoconv.core` raise subclasses of **`NeoConvError`** (not bare `ValueError`):
+
+| Class | Typical cause |
+|-------|----------------|
+| `InvalidNeoError` | Truncated or invalid `.neo` container |
+| `InvalidRomLayoutError` | Missing/duplicate ROM roles, ZIP/dir layout, C/V sequence gaps |
+| `InvalidConfigurationError` | Extract chip/bank size, P-ROM swap size rules |
+| `UserCancelledError` | GUI worker cancelled by the user |
+
+Each error has a stable **`code`** string and optional **`hint`** for remediation. The CLI prints hints after an em dash; the GUI logs them on the same line as the message.
 
 ---
 

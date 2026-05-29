@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .constants import P_SWAP_SIZE
+from .exceptions import InvalidConfigurationError
 from .mame_parse import parse_mame_dir, parse_mame_zip
 from .models import NeoMeta, RomSet, SwapMode
 from .neo_format import build_neo
@@ -26,8 +27,8 @@ def apply_swap_p(romset: RomSet, swap_p: SwapMode, verbose: bool = True) -> RomS
     Returns a new :class:`RomSet` with the swapped P-ROM; the original is
     never modified.
 
-    Raises :class:`ValueError` with a clear message when :attr:`SwapMode.YES`
-    is requested for a P-ROM that is not exactly 2 MB.
+    Raises :class:`InvalidConfigurationError` when :attr:`SwapMode.YES` is
+    requested for a P-ROM that is not exactly 2 MB.
     """
     if swap_p is SwapMode.AUTO:
         needed, reason = detect_swap_p_needed(romset.p)
@@ -54,11 +55,12 @@ def apply_swap_p(romset: RomSet, swap_p: SwapMode, verbose: bool = True) -> RomS
     elif swap_p is SwapMode.YES:
         p_size = len(romset.p)
         if p_size != P_SWAP_SIZE:
-            raise ValueError(
+            raise InvalidConfigurationError(
                 f"--swap-p yes requires a 2 MB P-ROM, but this ROM is "
                 f"{p_size:,} bytes ({p_size / 1024 / 1024:.2f} MB). "
                 "P-ROM bank swap is only defined for exactly 2 MB P-ROMs. "
-                "Use --swap-p auto or --swap-p no instead."
+                "Use --swap-p auto or --swap-p no instead.",
+                hint="Run neoconv detect-swap on the MAME set.",
             )
         return replace(romset, p=swap_p_banks(romset.p))
     return romset

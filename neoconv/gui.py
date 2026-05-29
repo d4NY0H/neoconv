@@ -38,7 +38,9 @@ from .core import (
     V_BANK_SIZE,
     NEO_HEADER_SIZE,
     NeoMeta,
+    NeoConvError,
     SwapMode,
+    UserCancelledError,
     apply_swap_p,
     build_neo,
     collect_pack_psm_roles_for_validation,
@@ -61,9 +63,8 @@ from .core import (
 
 # Expected failures from core / I/O in background worker threads (narrow catch).
 _GUI_WORKER_HANDLED_ERRORS: tuple[type[BaseException], ...] = (
+    NeoConvError,
     OSError,
-    ValueError,
-    RuntimeError,
     zipfile.BadZipFile,
     MemoryError,
 )
@@ -166,6 +167,19 @@ class _GuiWorkerBridge:
             self._after_id = self._host.after(self._POLL_MS, self._pump)
         else:
             self._after_id = None
+
+
+def _post_worker_error(wbridge: _GuiWorkerBridge, exc: BaseException) -> None:
+    if isinstance(exc, UserCancelledError):
+        wbridge.post_log("[INFO] Operation cancelled.")
+        return
+    if isinstance(exc, NeoConvError):
+        msg = str(exc)
+        if exc.hint:
+            msg = f"{msg} — {exc.hint}"
+        wbridge.post_log(f"[ERROR] {msg}")
+        return
+    wbridge.post_log(f"[ERROR] {exc}")
 
 
 def _c_chip_size_from_str(s: str) -> int:
@@ -599,7 +613,7 @@ class ExtractTab(ttk.Frame):
         def work():
             try:
                 if self._cancel_event.is_set():
-                    raise RuntimeError("Operation cancelled by user.")
+                    raise UserCancelledError("Operation cancelled by user.")
                 neo_data    = neo_path.read_bytes()
                 romset      = parse_neo(neo_data)
                 c_chip_size = _c_chip_size_from_str(self._c_size.value_str)
@@ -608,7 +622,7 @@ class ExtractTab(ttk.Frame):
                 self._wbridge.post_log(f"C chip size: {c_chip_size:,} bytes")
                 self._wbridge.post_log(f"V bank size: {v_bank_size:,} bytes")
                 if self._cancel_event.is_set():
-                    raise RuntimeError("Operation cancelled by user.")
+                    raise UserCancelledError("Operation cancelled by user.")
 
                 extract_warnings: list[warnings.WarningMessage] = []
                 with warnings.catch_warnings(record=True) as caught:
@@ -652,7 +666,7 @@ class ExtractTab(ttk.Frame):
                             self._wbridge.post_log(f"  {info.filename:<30} {info.file_size:>10,} bytes")
                 self._wbridge.post_log("[OK] Done.")
             except _GUI_WORKER_HANDLED_ERRORS as e:
-                self._wbridge.post_log(f"[ERROR] {e}")
+                _post_worker_error(self._wbridge, e)
             except Exception as e:
                 self._wbridge.post_log(f"[ERROR] Unexpected {type(e).__name__}: {e}")
             finally:
@@ -888,7 +902,7 @@ class PackTab(ttk.Frame):
         def work():
             try:
                 if self._cancel_event.is_set():
-                    raise RuntimeError("Operation cancelled by user.")
+                    raise UserCancelledError("Operation cancelled by user.")
                 self._wbridge.post_log(f"Packing: {src}")
 
                 pack_warnings: list[warnings.WarningMessage] = []
@@ -907,7 +921,7 @@ class PackTab(ttk.Frame):
                     tag = "auto-swap: YES -" if needed else "auto-swap: no -"
                     self._wbridge.post_log(f"  {tag} {reason}")
                     if self._cancel_event.is_set():
-                        raise RuntimeError("Operation cancelled by user.")
+                        raise UserCancelledError("Operation cancelled by user.")
 
                     with warnings.catch_warnings(record=True) as caught:
                         warnings.simplefilter("always")
@@ -916,7 +930,7 @@ class PackTab(ttk.Frame):
                     pack_warnings.extend(caught)
                 else:
                     if self._cancel_event.is_set():
-                        raise RuntimeError("Operation cancelled by user.")
+                        raise UserCancelledError("Operation cancelled by user.")
                     fn = mame_dir_to_neo if src.is_dir() else mame_zip_to_neo
                     with warnings.catch_warnings(record=True) as caught:
                         warnings.simplefilter("always")
@@ -936,13 +950,13 @@ class PackTab(ttk.Frame):
                         _seen_warn.add(msg)
                         self._wbridge.post_log(f"[WARN] {msg}")
                 if self._cancel_event.is_set():
-                    raise RuntimeError("Operation cancelled by user.")
+                    raise UserCancelledError("Operation cancelled by user.")
                 dest = out or src.with_suffix(".neo")
                 write_bytes_atomic(dest, neo_data)
                 self._wbridge.post_log(f"Written: {dest}  ({len(neo_data)/1024/1024:.2f} MB)")
                 self._wbridge.post_log("[OK] Done.")
             except _GUI_WORKER_HANDLED_ERRORS as e:
-                self._wbridge.post_log(f"[ERROR] {e}")
+                _post_worker_error(self._wbridge, e)
             except Exception as e:
                 self._wbridge.post_log(f"[ERROR] Unexpected {type(e).__name__}: {e}")
             finally:
@@ -1253,11 +1267,11 @@ class EditTab(ttk.Frame):
         def work() -> None:
             try:
                 if self._cancel_event.is_set():
-                    raise RuntimeError("Operation cancelled by user.")
+                    raise UserCancelledError("Operation cancelled by user.")
                 self._wbridge.post_log(f"Reading: {inp}")
                 data = inp.read_bytes()
                 if self._cancel_event.is_set():
-                    raise RuntimeError("Operation cancelled by user.")
+                    raise UserCancelledError("Operation cancelled by user.")
                 new_data = replace_neo_metadata(
                     data,
                     name=self._vars["name"].get(),
@@ -1268,14 +1282,14 @@ class EditTab(ttk.Frame):
                     screenshot=screenshot,
                 )
                 if self._cancel_event.is_set():
-                    raise RuntimeError("Operation cancelled by user.")
+                    raise UserCancelledError("Operation cancelled by user.")
                 write_bytes_atomic(dest, new_data)
                 self._wbridge.post_log(f"Written: {dest}")
                 rs = parse_neo(new_data)
                 self._wbridge.post_log(rs.meta.format_info(rs))
                 self._wbridge.post_log("[OK] Metadata updated.")
             except _GUI_WORKER_HANDLED_ERRORS as e:
-                self._wbridge.post_log(f"[ERROR] {e}")
+                _post_worker_error(self._wbridge, e)
             except Exception as e:
                 self._wbridge.post_log(f"[ERROR] Unexpected {type(e).__name__}: {e}")
             finally:

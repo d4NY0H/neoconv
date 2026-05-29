@@ -40,6 +40,7 @@ from .core import (
     V_BANK_SIZE,
     GENRES,
     GENRE_BY_NAME,
+    NeoConvError,
     NeoMeta,
     RomSet,
     SwapMode,
@@ -416,6 +417,12 @@ def main() -> None:
     args = parser.parse_args()
     try:
         args.func(args)
+    except NeoConvError as exc:
+        msg = str(exc)
+        if exc.hint:
+            msg = f"{msg} — {exc.hint}"
+        print(f"Error: {msg}", file=sys.stderr)
+        sys.exit(1)
     except (ValueError, OSError, zipfile.BadZipFile, MemoryError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .constants import P_SWAP_SIZE
+from .exceptions import InvalidConfigurationError
 
 # Neo Geo cartridge map: plausibility checks on M68000 reset vectors
 # (68000 big-endian longword SP and PC after MAME byte-pair swap).
@@ -25,10 +26,10 @@ def swap_p_banks(p_rom: bytes) -> bytes:
     override. Applying a swap when it is not needed (or skipping it when needed)
     will break the game.
 
-    Only valid for exactly 2 MB P-ROMs. Raises ValueError otherwise.
+    Only valid for exactly 2 MB P-ROMs. Raises :class:`InvalidConfigurationError` otherwise.
     """
     if len(p_rom) != P_SWAP_SIZE:
-        raise ValueError(
+        raise InvalidConfigurationError(
             f"P-ROM bank swap requires exactly 2 MB (got {len(p_rom):,} bytes)."
         )
     half = P_SWAP_SIZE // 2
@@ -40,7 +41,7 @@ def _word_swap(data: bytes) -> bytes:
     Swap every pair of adjacent bytes (MAME P-ROM byte-order correction).
 
     *data* must have an even length (16-bit word aligned); odd lengths raise
-    :class:`ValueError`.
+    :class:`InvalidConfigurationError`.
 
     Note: callers always pass at most 8 bytes (the vector table prefix from
     ``check_m68k_vectors``), so the loop is trivially short. Vectorised
@@ -48,7 +49,7 @@ def _word_swap(data: bytes) -> bytes:
     """
     n = len(data)
     if n % 2 != 0:
-        raise ValueError(
+        raise InvalidConfigurationError(
             f"P-ROM word-swap requires an even byte length (got {n} bytes)."
         )
     b = bytearray(data)

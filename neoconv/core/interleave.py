@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .exceptions import InvalidRomLayoutError
+
 
 def interleave_c_chips(chips: list[bytes]) -> bytes:
     """
@@ -10,7 +12,7 @@ def interleave_c_chips(chips: list[bytes]) -> bytes:
     Output: interleaved(c1,c2) + interleaved(c3,c4) + ...
     """
     if len(chips) % 2 != 0:
-        raise ValueError(
+        raise InvalidRomLayoutError(
             f"C chips must come in pairs; got {len(chips)} chip(s). "
             "Check that all C ROM files are present and correctly named."
         )
@@ -19,7 +21,7 @@ def interleave_c_chips(chips: list[bytes]) -> bytes:
         a = chips[i]
         b = chips[i + 1]
         if len(a) != len(b):
-            raise ValueError(
+            raise InvalidRomLayoutError(
                 f"C chip pair {i+1}/{i+2} size mismatch: "
                 f"{len(a)} vs {len(b)} bytes."
             )

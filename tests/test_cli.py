@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from neoconv.core import SwapMode
+from neoconv.core import InvalidRomLayoutError, SwapMode
 from neoconv import cli
 from neoconv.core import parse_neo, write_bytes_atomic as _write_bytes_atomic
 
@@ -423,7 +423,7 @@ def test_main_value_error_exits(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         cli,
         "mame_dir_to_neo",
-        lambda *_a, **_kw: (_ for _ in ()).throw(ValueError("pack failed")),
+        lambda *_a, **_kw: (_ for _ in ()).throw(InvalidRomLayoutError("pack failed")),
     )
     monkeypatch.setattr(cli.sys, "argv", ["neoconv", "pack", str(roms), "-o", str(tmp_path / "o.neo")])
     with pytest.raises(SystemExit) as exc:

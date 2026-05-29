@@ -7,6 +7,7 @@ import hashlib
 from dataclasses import dataclass, field
 
 from .constants import C_CHIP_SIZE_DEFAULT, GENRES, NEO_HEADER_SIZE, V_BANK_SIZE
+from .exceptions import InvalidConfigurationError
 
 
 class SwapMode(enum.Enum):
@@ -98,7 +99,7 @@ class RomSet:
                     Use 4 MB or other sizes when the MAME set uses larger V ROMs.
         """
         if bank_size <= 0:
-            raise ValueError(f"V bank size must be positive (got {bank_size}).")
+            raise InvalidConfigurationError(f"V bank size must be positive (got {bank_size}).")
         chunks = []
         for i in range(0, len(self.v), bank_size):
             chunks.append(self.v[i : i + bank_size])
@@ -124,10 +125,11 @@ class RomSet:
         """
         bank_size = chip_size * 2
         if len(self.c) % bank_size != 0:
-            raise ValueError(
+            raise InvalidConfigurationError(
                 f"C ROM size ({len(self.c):,} bytes) is not a multiple of "
                 f"chip_size*2 ({bank_size:,} bytes). "
-                f"Try a different --c-chip-size value."
+                f"Try a different --c-chip-size value.",
+                hint="Check per-chip sizes in MAME neogeo.xml (see --c-chip-size).",
             )
         chips = []
         for bank_start in range(0, len(self.c), bank_size):
