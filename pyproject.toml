@@ -31,3 +31,4 @@ where = ["."]
 
 [tool.setuptools.package-data]
 neoconv = ["py.typed"]
+"neoconv.assets" = ["*.png", "*.ico", "*.icns"]

@@ -267,6 +267,7 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"neoconv {__version__}")
+        _apply_window_icon(self)
         # Allow resizing so the log area can grow on demand.
         self.resizable(True, True)
         nb = ttk.Notebook(self)
@@ -282,6 +283,26 @@ class NeoConvApp(TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk):
 
     def _on_close(self):
         self.destroy()
+
+
+def _apply_window_icon(root: tk.Tk) -> None:
+    """
+    Set the window / taskbar icon from the packaged PNG when possible.
+
+    Fails soft if the asset is missing (incomplete checkout) or the platform
+    / Tk build cannot display it.
+    """
+    try:
+        from importlib.resources import as_file, files
+
+        resource = files("neoconv.assets").joinpath("neoconv.png")
+        with as_file(resource) as path:
+            icon = tk.PhotoImage(file=str(path))
+            root.iconphoto(True, icon)
+            # Keep a reference so Tk does not garbage-collect the image.
+            root._neoconv_icon = icon  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------

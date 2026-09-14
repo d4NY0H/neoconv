@@ -124,3 +124,38 @@ def test_format_neoconv_error_includes_hint():
     exc = InvalidNeoError("bad header", hint="check file size")
     assert gui._format_neoconv_error(exc) == "bad header — check file size"
     assert gui._format_neoconv_error(InvalidNeoError("only message")) == "only message"
+
+
+def test_app_icon_png_is_packaged():
+    from importlib.resources import files
+
+    icon = files("neoconv.assets").joinpath("neoconv.png")
+    assert icon.is_file()
+
+
+def test_apply_window_icon_sets_photo_or_fails_soft():
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        gui._apply_window_icon(root)
+        # Soft-fail leaves no icon; success stores a PhotoImage reference.
+        icon = getattr(root, "_neoconv_icon", None)
+        if icon is not None:
+            assert isinstance(icon, tk.PhotoImage)
+    finally:
+        root.destroy()
+
+
+def test_apply_window_icon_swallows_lookup_errors(monkeypatch):
+    root = tk.Tk()
+    root.withdraw()
+    try:
+
+        def _boom(*_a, **_k):
+            raise FileNotFoundError("missing icon")
+
+        monkeypatch.setattr("importlib.resources.files", _boom)
+        gui._apply_window_icon(root)  # must not raise
+        assert not hasattr(root, "_neoconv_icon")
+    finally:
+        root.destroy()

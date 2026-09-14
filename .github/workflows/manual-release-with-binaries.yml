@@ -133,13 +133,32 @@ jobs:
               "from neoconv.gui import main\nif __name__ == '__main__':\n    main()\n"
           )
 
-      - name: Build with PyInstaller (Windows / Linux)
-        if: matrix.label != 'macos'
-        run: pyinstaller --onefile --windowed --collect-all tkinterdnd2 --name neoconv-gui _gui_entry.py
+      - name: Build with PyInstaller (Windows)
+        if: matrix.label == 'windows'
+        run: >
+          pyinstaller --onefile --windowed
+          --collect-all tkinterdnd2
+          --collect-data neoconv
+          --icon neoconv/assets/neoconv.ico
+          --name neoconv-gui _gui_entry.py
+
+      - name: Build with PyInstaller (Linux)
+        if: matrix.label == 'linux'
+        run: >
+          pyinstaller --onefile --windowed
+          --collect-all tkinterdnd2
+          --collect-data neoconv
+          --icon neoconv/assets/neoconv.png
+          --name neoconv-gui _gui_entry.py
 
       - name: Build with PyInstaller (macOS — .app bundle)
         if: matrix.label == 'macos'
-        run: pyinstaller --windowed --collect-all tkinterdnd2 --name neoconv-gui _gui_entry.py
+        run: >
+          pyinstaller --windowed
+          --collect-all tkinterdnd2
+          --collect-data neoconv
+          --icon neoconv/assets/neoconv.icns
+          --name neoconv-gui _gui_entry.py
 
       - name: Package and rename (Windows)
         if: matrix.label == 'windows'
