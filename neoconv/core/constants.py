@@ -24,6 +24,11 @@ _RE_SYNTH_S_C1R_OR_C2R_CHIP = re.compile(
     r"[-_]c1r\.(?:c1|bin)\b|[-_]c2r\.(?:c2|bin)\b",
     re.IGNORECASE,
 )
+# Split C-chip parts: ``kf10-c1a.bin``, ``5232-c2b.bin`` → role C1/C2 + letter a/b.
+_RE_C_LETTER_SPLIT = re.compile(
+    r"[-_]c([1-9]|1[0-6])([a-z])$",
+    re.IGNORECASE,
+)
 
 GENRES = {
     0: "Other",

@@ -8,9 +8,31 @@ import warnings
 from pathlib import Path
 from typing import Optional
 
-from .constants import NEO_HEADER_SIZE, NEO_MAGIC
+from .constants import GENRES, NEO_HEADER_SIZE, NEO_MAGIC
 from .exceptions import InvalidNeoError
 from .models import NeoMeta, RomSet
+
+
+def _looks_like_legacy_uint16_meta(data: bytes) -> bool:
+    """
+    Detect pre-fix neoconv headers that packed Year/Genre as uint16 at 0x1C/0x1E.
+
+    TerraOnion / neosdconv (and current neoconv) use four uint32 fields starting
+    at 0x1C, with NGH at 0x28. Old writers left 0x28..0x2B zero and stored genre
+    in the high half of the first meta word. When genre was 0 the layouts are
+    ambiguous; those files are read as the modern layout.
+    """
+    year16 = struct.unpack_from("<H", data, 0x1C)[0]
+    genre16 = struct.unpack_from("<H", data, 0x1E)[0]
+    year32 = struct.unpack_from("<I", data, 0x1C)[0]
+    ngh_at_28 = struct.unpack_from("<I", data, 0x28)[0]
+    if ngh_at_28 != 0:
+        return False
+    if genre16 == 0 or genre16 not in GENRES:
+        return False
+    if not (1900 <= year16 <= 2100):
+        return False
+    return year32 == year16 + (genre16 << 16)
 
 
 def _meta_from_neo_header_prefix(data: bytes) -> NeoMeta:
@@ -21,10 +43,26 @@ def _meta_from_neo_header_prefix(data: bytes) -> NeoMeta:
         raise InvalidNeoError(
             f"Not a valid .neo file (magic={data[:4]!r}, expected {NEO_MAGIC!r})"
         )
-    year = struct.unpack_from("<H", data, 0x1C)[0]
-    genre = struct.unpack_from("<H", data, 0x1E)[0]
-    screenshot = struct.unpack_from("<I", data, 0x20)[0]
-    ngh = struct.unpack_from("<I", data, 0x24)[0]
+
+    if _looks_like_legacy_uint16_meta(data):
+        warnings.warn(
+            "This .neo uses a legacy neoconv header (Year/Genre as uint16). "
+            "Metadata is being read with the old layout; rewriting with edit "
+            "or pack will emit the TerraOnion uint32 layout.",
+            UserWarning,
+            stacklevel=3,
+        )
+        year = struct.unpack_from("<H", data, 0x1C)[0]
+        genre = struct.unpack_from("<H", data, 0x1E)[0]
+        screenshot = struct.unpack_from("<I", data, 0x20)[0]
+        ngh = struct.unpack_from("<I", data, 0x24)[0]
+    else:
+        # TerraOnion / neosdconv: four consecutive uint32 after the size fields.
+        year = struct.unpack_from("<I", data, 0x1C)[0]
+        genre = struct.unpack_from("<I", data, 0x20)[0]
+        screenshot = struct.unpack_from("<I", data, 0x24)[0]
+        ngh = struct.unpack_from("<I", data, 0x28)[0]
+
     name = data[0x2C:0x4D].split(b"\x00")[0].decode("latin-1")
     manufacturer = data[0x4D:0x5E].split(b"\x00")[0].decode("latin-1")
     return NeoMeta(
@@ -115,10 +153,10 @@ def _pack_neo_header(
     struct.pack_into("<I", header, 0x14, 0)  # V2 size (merged into V1)
     struct.pack_into("<I", header, 0x18, c_size)
 
-    struct.pack_into("<H", header, 0x1C, meta.year)
-    struct.pack_into("<H", header, 0x1E, meta.genre)
-    struct.pack_into("<I", header, 0x20, meta.screenshot)
-    struct.pack_into("<I", header, 0x24, meta.ngh)
+    struct.pack_into("<I", header, 0x1C, meta.year)
+    struct.pack_into("<I", header, 0x20, meta.genre)
+    struct.pack_into("<I", header, 0x24, meta.screenshot)
+    struct.pack_into("<I", header, 0x28, meta.ngh)
 
     name_b = meta.name.encode("latin-1", errors="replace")[:32]
     header[0x2C : 0x2C + len(name_b)] = name_b

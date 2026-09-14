@@ -16,10 +16,10 @@ The .neo format (TerraOnion NeoSD):
   Offset 0x010  V1 ROM size uint32 LE
   Offset 0x014  V2 ROM size uint32 LE
   Offset 0x018  C ROM size  uint32 LE  (total, interleaved)
-  Offset 0x01C  Year        uint16 LE
-  Offset 0x01E  Genre       uint16 LE
-  Offset 0x020  Screenshot  uint32 LE
-  Offset 0x024  NGH number  uint32 LE
+  Offset 0x01C  Year        uint32 LE
+  Offset 0x020  Genre       uint32 LE
+  Offset 0x024  Screenshot  uint32 LE
+  Offset 0x028  NGH number  uint32 LE
   Offset 0x02C  Name        33 bytes, null-terminated
   Offset 0x04D  Mfr         17 bytes, null-terminated
   Offset 0x200  (header padded to 0x1000 = 4096 bytes)

@@ -248,8 +248,8 @@ neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
 |--------|---------|-------------|
 | `--name`, `-n` | `Unknown` | Game title in the `.neo` header: **latin-1**, max **32** content bytes (33-byte field incl. NUL). The GUI truncates to this limit. |
 | `--manufacturer`, `-m` | `Unknown` | Manufacturer string: **latin-1**, max **16** content bytes (17-byte field incl. NUL). The GUI truncates to this limit. |
-| `--year`, `-y` | `0` | Release year: **uint16** (0–65535). |
-| `--genre`, `-g` | `Other` | Genre **name** or numeric **uint16** id (see list below). |
+| `--year`, `-y` | `0` | Release year: **uint32**. |
+| `--genre`, `-g` | `Other` | Genre **name** or numeric **uint32** id (see list below). |
 | `--ngh` | `0` | NGH catalogue number: **uint32** (non-negative integer). |
 | `--screenshot` | `0` | TerraOnion screenshot index: **uint32** (non-negative integer). |
 | `--out`, `-o` | *(input stem + `.neo`)* | Output `.neo` path |
@@ -293,8 +293,8 @@ neoconv edit game.neo --genre Fighting --year 1994 --ngh 65 --out game_fixed.neo
 | `--out`, `-o` | *(overwrite input)* | Output `.neo` path |
 | `--name`, `-n` | — | Same limits as `pack`: latin-1, max **32** content bytes |
 | `--manufacturer`, `-m` | — | Same limits as `pack`: latin-1, max **16** content bytes |
-| `--year`, `-y` | — | **uint16** year |
-| `--genre`, `-g` | — | Genre name or **uint16** id (same set as `pack`) |
+| `--year`, `-y` | — | **uint32** year |
+| `--genre`, `-g` | — | Genre name or **uint32** id (same set as `pack`) |
 | `--ngh` | — | **uint32** NGH number |
 | `--screenshot` | — | **uint32** screenshot index |
 
@@ -371,15 +371,13 @@ The table below matches the primary rules in `name_to_role`: extension (e.g. `.p
 | **S ROM** | `.s1`, `-s1.bin`, `_s1.bin` |
 | **M ROM** | `.m1`, `-m1.bin`, `_m1.bin` |
 | **V ROMs** | `.v1`-`.v8`, `-v1.bin`-`-v8.bin`, `_v1.bin`-`_v8.bin` |
-| **C ROMs** | `.c1`-`.c16`, `-c1.bin`-`-c16.bin`, `_c1.bin`-`_c16.bin` (C9–C16 for extended / hack sets) |
+| **C ROMs** | `.c1`-`.c16`, `-c1.bin`-`-c16.bin`, `_c1.bin`-`_c16.bin`, and letter-split parts `-c1a.bin` / `-c1b.bin` (C9–C16 for extended / hack sets) |
 
 #### Directory layout and sequence gaps
 
 `pack` reads ROM files in the chosen folder **and one level of subfolders** (typical after unzipping).
 
 **Gaps** in the V or C sequence (e.g. `v1` + `v3` without `v2`) cause pack to **abort** with an error instead of producing a broken `.neo`.
-
-Not every MAME filename variant is mapped (for example some `*-c1a.bin`-style names are **not** assigned a **C** role). Those files may still participate in other logic (see below).
 
 #### Synthetic S-ROM (no physical `s1`)
 
@@ -392,20 +390,22 @@ Some MAME parents (e.g. PVC / encrypted boards) ship without a separate text-lay
 | Certain **three-digit MAME set IDs** in `NNN-p1.` / `NNN-m1.` / `NNN-c1….c1` (see `_SYNTH_S_MAME_512K_SET_IDS` in `neoconv/core/constants.py`) | 512 KiB |
 | Default | 128 KiB |
 
+If synthetic S is injected but **no** C sprite data was collected, pack **aborts** (avoids a silent empty-C `.neo`).
+
 #### FBNeo compatibility
 
 FBNeo Neo Geo sets use the same ROM naming conventions as MAME and are supported out of the box. BIOS-related files (`000-lo.lo`, `sfix.sfix`, `sm1.sm1`, `sp-s2.sp1`, etc.) are ignored automatically.
 
 Sets where C-chip filenames carry a suffix in the **stem** but use native extensions (e.g. `263-c1d.c1`, `269-c1r.c1`, `268-c1c.c1`) are recognised correctly — the extension `.c1` / `.c2` match takes priority.
 
-**Exception — split C chips (`c1a` + `c1b` style):** Four hack/homebrew sets use a two-file split for individual C chips with `.bin` extension:
+**Split C chips (`c1a` + `c1b` style):** Hack/homebrew sets that split individual C chips across letter-suffixed `.bin` files are merged automatically (parts concatenated in letter order, then interleaved as usual):
 
-| Set | Files | Fix |
-|-----|-------|-----|
-| `kog`, `kogplus` | `5232-c1a.bin` + `5232-c1b.bin` → `c1`, etc. | `cat 5232-c1a.bin 5232-c1b.bin > 5232-c1.bin` |
-| `kof10th` and variants | `kf10-c1a.bin` + `kf10-c1b.bin` → `c1`, etc. | `cat kf10-c1a.bin kf10-c1b.bin > kf10-c1.bin` |
+| Set | Files |
+|-----|-------|
+| `kog`, `kogplus` | `5232-c1a.bin` + `5232-c1b.bin` → `c1`, etc. |
+| `kof10th` and variants | `kf10-c1a.bin` + `kf10-c1b.bin` → `c1`, etc. |
 
-Merge each split pair with `cat` (Linux/macOS) before packing. All official SNK titles and the vast majority of hacks work without any preparation.
+A single letter part alone (e.g. only `kf10-c1a.bin` / `kf10-c2a.bin`) is also accepted as the full chip. All official SNK titles and the vast majority of hacks work without any preparation.
 
 #### Ignored files
 
@@ -504,10 +504,10 @@ Offset 0x00C   M ROM size    uint32 LE
 Offset 0x010   V1 ROM size   uint32 LE   (all V data merged here on write; read accepts split V1/V2)
 Offset 0x014   V2 ROM size   uint32 LE   (0 when written by neoconv; non-zero allowed on read)
 Offset 0x018   C ROM size    uint32 LE   (total, interleaved)
-Offset 0x01C   Year          uint16 LE
-Offset 0x01E   Genre         uint16 LE
-Offset 0x020   Screenshot    uint32 LE
-Offset 0x024   NGH number    uint32 LE
+Offset 0x01C   Year          uint32 LE
+Offset 0x020   Genre         uint32 LE
+Offset 0x024   Screenshot    uint32 LE
+Offset 0x028   NGH number    uint32 LE
 Offset 0x02C   Name          33 bytes, null-terminated, latin-1
 Offset 0x04D   Manufacturer  17 bytes, null-terminated, latin-1
 Offset 0x200-0xFFF  (padding, header is always 4096 bytes)
@@ -531,8 +531,11 @@ For hacks and CD conversions, MAME `verifyroms` may report CRC mismatches becaus
 - **`detect-swap` on `.neo` files:** not useful — the P-ROM swap is applied during `pack` and already encoded in the `.neo` payload. There is nothing left to detect.
 - **`verify` CLI subcommand:** `verify_roundtrip` exists in `neoconv.core` as a testing utility. Exposing it as a CLI command would only confirm that neoconv round-trips its own output correctly, which is covered by the test suite. It is not a user-facing feature.
 - **Directory traversal deeper than one level** in `pack`: the one-level limit (top-level files + one subdirectory) covers all known MAME unzip layouts. Recursive traversal would risk picking up unrelated files from nested archives or build artefacts.
-- **Automatic merging of split C chips** (`c1a`+`c1b` style): see [FBNeo compatibility](#fbneo-compatibility).
 - **FBNeo as a separate input format:** FBNeo Neo Geo sets use the same naming conventions as MAME and are supported out of the box — see [FBNeo compatibility](#fbneo-compatibility).
+
+#### Legacy neoconv headers (Year/Genre as uint16)
+
+Older neoconv builds packed Year/Genre as **uint16** at `0x1C`/`0x1E` (NGH at `0x24`). Current neoconv matches TerraOnion / neosdconv (**four uint32**). On read, headers that still look like the old layout (non-zero packed genre beside year, NGH slot at `0x28` empty) are detected, parsed correctly, and emit a `UserWarning`. Rewriting with `edit` or `pack` migrates them to the modern layout. Files with **genre 0** under the old layout cannot be distinguished reliably and are read as modern.
 
 ---
 

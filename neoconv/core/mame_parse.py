@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from .constants import (
+    _RE_C_LETTER_SPLIT,
     _RE_SYNTH_S_C1R_OR_C2R_CHIP,
     _RE_SYNTH_S_KF10_BOOTLEG,
     _SYNTH_S_MAME_512K_SET_IDS,
@@ -40,6 +41,25 @@ def pack_psm_role_from_basename(filename: str) -> Optional[str]:
         ):
             return role
     return None
+
+
+def _c_letter_split_part(filename: str) -> Optional[tuple[str, str]]:
+    """
+    Map split C-chip basenames to ``(role, letter)``.
+
+    Examples: ``kf10-c1a.bin`` → ``("C1", "a")``, ``5232-c2b.bin`` → ``("C2", "b")``.
+    Native extensions such as ``.c1`` are not treated as splits (handled by
+    :func:`name_to_role` first via the extension map).
+    """
+    fn = Path(filename).name
+    stem = Path(fn).stem
+    ext = Path(fn).suffix.lstrip(".").lower()
+    if ext.startswith("c") and ext[1:].isdigit():
+        return None
+    m = _RE_C_LETTER_SPLIT.search(stem)
+    if not m:
+        return None
+    return (f"C{int(m.group(1))}", m.group(2).lower())
 
 
 def name_to_role(filename: str) -> Optional[str]:
@@ -99,6 +119,11 @@ def name_to_role(filename: str) -> Optional[str]:
             or stem.endswith(f"_{key}")
         ):
             return role
+
+    # Split C chips: kf10-c1a.bin / 5232-c2b.bin → C1 / C2 (parts merged later).
+    split = _c_letter_split_part(filename)
+    if split is not None:
+        return split[0]
     return None
 
 
@@ -107,7 +132,7 @@ def _filenames_imply_c1_sprite_rom(filenames: tuple[str, ...]) -> bool:
     True if the input looks like it includes a Neo Geo C1 sprite ROM.
 
     MAME uses several naming schemes (``253-c1.c1``, ``mart-c1.bin``,
-    ``kf10-c1a.bin``); :func:`name_to_role` only covers the common forms.
+    ``kf10-c1a.bin``).
     """
     for p in filenames:
         n = Path(p).name
@@ -219,13 +244,14 @@ def _inject_synthetic_s_rom_if_needed(
     roles: dict[str, bytes],
     source: str,
     source_filenames: tuple[str, ...] | None,
-) -> None:
+) -> bool:
+    """Inject zero-filled S when needed. Returns True if injection happened."""
     if "S" in roles or source_filenames is None:
-        return
+        return False
     names = source_filenames
     psm = {r for n in names if (r := pack_psm_role_from_basename(n))}
     if not _should_inject_synthetic_s_rom(names, psm):
-        return
+        return False
     size = _synthetic_zero_s_size_from_filenames(names)
     roles["S"] = b"\x00" * size
     warnings.warn(
@@ -234,6 +260,7 @@ def _inject_synthetic_s_rom_if_needed(
         UserWarning,
         stacklevel=3,
     )
+    return True
 
 
 def roles_to_romset(
@@ -252,7 +279,7 @@ def roles_to_romset(
     synthetic S region matching MAME's ``fixed`` area behaviour.
     """
     roles = dict(roles)
-    _inject_synthetic_s_rom_if_needed(roles, source, source_filenames)
+    injected_s = _inject_synthetic_s_rom_if_needed(roles, source, source_filenames)
     missing = [r for r in ("P", "S", "M") if r not in roles]
     if missing:
         tips_by_role = {
@@ -296,6 +323,14 @@ def roles_to_romset(
                 f"Expected e.g. game-c{i}.bin or game.c{i}."
             )
 
+    if injected_s and not c_chips_raw:
+        raise InvalidRomLayoutError(
+            f"No C sprite ROM data collected from {source or 'input'}, but a "
+            "synthetic S-ROM was injected because filenames looked like a C1 "
+            "set. Sprite chips were likely ignored due to unsupported naming. "
+            "Use --diagnostic to list unrecognized filenames."
+        )
+
     if c_chips_raw and len(c_chips_raw) % 2 != 0:
         raise InvalidRomLayoutError(
             f"Odd number of C chips ({len(c_chips_raw)}) in {source or 'input'}. "
@@ -335,6 +370,81 @@ def _store_role_data(
     roles[role] = data
 
 
+def _store_c_letter_part(
+    c_parts: dict[str, dict[str, bytes]],
+    roles: dict[str, bytes],
+    role: str,
+    letter: str,
+    data: bytes,
+    source_name: str,
+) -> None:
+    """Accumulate a letter-split C chip part (``c1a``, ``c1b``, …)."""
+    if role in roles:
+        raise InvalidRomLayoutError(
+            f"Duplicate ROM role '{role}' in input: '{source_name}'. "
+            "Cannot mix a complete C chip file with split parts (cNa/cNb)."
+        )
+    parts = c_parts.setdefault(role, {})
+    if letter in parts:
+        raise InvalidRomLayoutError(
+            f"Duplicate split C part '{role}{letter}' in input: '{source_name}'."
+        )
+    parts[letter] = data
+
+
+def _flush_c_letter_parts(
+    c_parts: dict[str, dict[str, bytes]],
+    roles: dict[str, bytes],
+) -> None:
+    """Concatenate letter-split C parts in alphabetical order into *roles*."""
+    for role, parts in sorted(c_parts.items(), key=lambda item: item[0]):
+        letters = sorted(parts)
+        merged = b"".join(parts[letter] for letter in letters)
+        label = "+".join(f"{role[1:].lower()}{letter}" for letter in letters)
+        _store_role_data(roles, role, merged, f"merged ({label})", False)
+
+
+def _ingest_named_rom(
+    filename: str,
+    data: bytes,
+    roles: dict[str, bytes],
+    c_parts: dict[str, dict[str, bytes]],
+    ignored: list[str],
+    diagnostic: bool,
+) -> None:
+    """Classify one ROM file into *roles*, letter-split *c_parts*, or *ignored*."""
+    split = _c_letter_split_part(filename)
+    if split is not None:
+        role, letter = split
+        _store_c_letter_part(c_parts, roles, role, letter, data, filename)
+        return
+    role = name_to_role(filename)
+    if role is not None:
+        _store_role_data(roles, role, data, filename, diagnostic)
+    else:
+        ignored.append(filename)
+
+
+def _romset_from_collected_roles(
+    roles: dict[str, bytes],
+    c_parts: dict[str, dict[str, bytes]],
+    ignored: list[str],
+    all_names: list[str],
+    source: str,
+    diagnostic: bool,
+) -> RomSet:
+    """Flush split C parts, emit diagnostic warnings, build a RomSet."""
+    _flush_c_letter_parts(c_parts, roles)
+    if diagnostic and ignored:
+        for fn in ignored:
+            warnings.warn(
+                f"[diagnostic] Unrecognized file ignored: '{fn}' — "
+                "check naming (expected e.g. game-p1.bin, game-c1.c1, ...)",
+                stacklevel=3,
+            )
+    return roles_to_romset(roles, source=source, source_filenames=tuple(all_names))
+
+
 def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
     """Parse a MAME ROM zip and return a RomSet.
 
@@ -345,6 +455,7 @@ def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
                  recognized, so the user can diagnose naming issues.
     """
     roles: dict[str, bytes] = {}
+    c_parts: dict[str, dict[str, bytes]] = {}
     ignored: list[str] = []
     all_names: list[str] = []
     try:
@@ -353,25 +464,20 @@ def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
                 if entry.is_dir():
                     continue
                 all_names.append(entry.filename)
-                role = name_to_role(entry.filename)
-                if role is not None:
-                    _store_role_data(
-                        roles, role, zf.read(entry.filename), entry.filename, diagnostic
-                    )
-                else:
-                    ignored.append(entry.filename)
+                _ingest_named_rom(
+                    entry.filename,
+                    zf.read(entry.filename),
+                    roles,
+                    c_parts,
+                    ignored,
+                    diagnostic,
+                )
     except zipfile.BadZipFile as e:
         raise InvalidRomLayoutError(f"Cannot open ZIP file '{zip_path}': {e}") from e
 
-    if diagnostic and ignored:
-        for fn in ignored:
-            warnings.warn(
-                f"[diagnostic] Unrecognized file ignored: '{fn}' — "
-                "check naming (expected e.g. game-p1.bin, game-c1.c1, ...)",
-                stacklevel=2,
-            )
-
-    return roles_to_romset(roles, source=str(zip_path), source_filenames=tuple(all_names))
+    return _romset_from_collected_roles(
+        roles, c_parts, ignored, all_names, str(zip_path), diagnostic
+    )
 
 
 def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
@@ -390,22 +496,13 @@ def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
     diagnostics and ``source_filenames`` metadata are reproducible.
     """
     roles: dict[str, bytes] = {}
+    c_parts: dict[str, dict[str, bytes]] = {}
     ignored: list[str] = []
     all_names: list[str] = []
     for f in iter_mame_dir_rom_files(dir_path):
         all_names.append(f.name)
-        role = name_to_role(f.name)
-        if role is not None:
-            _store_role_data(roles, role, f.read_bytes(), f.name, diagnostic)
-        else:
-            ignored.append(f.name)
+        _ingest_named_rom(f.name, f.read_bytes(), roles, c_parts, ignored, diagnostic)
 
-    if diagnostic and ignored:
-        for fn in ignored:
-            warnings.warn(
-                f"[diagnostic] Unrecognized file ignored: '{fn}' — "
-                "check naming (expected e.g. game-p1.bin, game-c1.c1, ...)",
-                stacklevel=2,
-            )
-
-    return roles_to_romset(roles, source=str(dir_path), source_filenames=tuple(all_names))
+    return _romset_from_collected_roles(
+        roles, c_parts, ignored, all_names, str(dir_path), diagnostic
+    )

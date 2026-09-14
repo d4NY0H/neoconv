@@ -122,6 +122,15 @@ class TestNameToRole:
         assert name_to_role("269-c1r.c1") == "C1"
         assert name_to_role("269-c2r.c2") == "C2"
 
+    def test_letter_split_c_chips(self):
+        assert name_to_role("kf10-c1a.bin") == "C1"
+        assert name_to_role("kf10-c2a.bin") == "C2"
+        assert name_to_role("kf10-c1b.bin") == "C1"
+        assert name_to_role("5232-c1a.bin") == "C1"
+        assert name_to_role("5232-c2b.bin") == "C2"
+        # Native .c1 extension still wins over stem letter suffix.
+        assert name_to_role("271-c1c.c1") == "C1"
+
 
 # ---------------------------------------------------------------------------
 # C ROM interleaving / de-interleaving
@@ -244,6 +253,54 @@ class TestBuildParseNeo:
         assert parsed.meta.ngh == 65
         assert parsed.meta.genre == 3
 
+    def test_metadata_terraonion_uint32_offsets(self):
+        """Year/Genre/Screenshot/NGH are four consecutive uint32 (neosdconv layout)."""
+        rs = make_romset()
+        meta = NeoMeta(
+            name="OffsetCheck",
+            manufacturer="SNK",
+            year=1994,
+            genre=9,
+            screenshot=7,
+            ngh=101,
+        )
+        neo = build_neo(rs, meta)
+        assert struct.unpack_from("<I", neo, 0x1C)[0] == 1994
+        assert struct.unpack_from("<I", neo, 0x20)[0] == 9
+        assert struct.unpack_from("<I", neo, 0x24)[0] == 7
+        assert struct.unpack_from("<I", neo, 0x28)[0] == 101
+        # Name still starts at 0x2C (must not be overwritten by NGH).
+        assert neo[0x2C:0x2C + 11] == b"OffsetCheck"
+
+    def test_parse_legacy_uint16_meta_and_rewrite_to_uint32(self):
+        """Old neoconv Year/Genre uint16 headers are detected, read, then rewritten."""
+        rs = make_romset()
+        neo = bytearray(build_neo(rs, NeoMeta(name="Legacy", year=0, genre=0, ngh=0)))
+        # Simulate pre-fix layout: uint16 year/genre, then screenshot/ngh uint32.
+        struct.pack_into("<H", neo, 0x1C, 1994)
+        struct.pack_into("<H", neo, 0x1E, 9)
+        struct.pack_into("<I", neo, 0x20, 7)
+        struct.pack_into("<I", neo, 0x24, 101)
+        struct.pack_into("<I", neo, 0x28, 0)
+        with pytest.warns(UserWarning, match="legacy neoconv header"):
+            meta = parse_neo(bytes(neo)).meta
+        assert meta.year == 1994
+        assert meta.genre == 9
+        assert meta.screenshot == 7
+        assert meta.ngh == 101
+        with pytest.warns(UserWarning, match="legacy neoconv header"):
+            rewritten = replace_neo_metadata(bytes(neo), name="Migrated")
+        # No legacy warning on the rewritten modern header.
+        parsed = parse_neo(rewritten)
+        assert parsed.meta.name == "Migrated"
+        assert parsed.meta.year == 1994
+        assert parsed.meta.genre == 9
+        assert parsed.meta.screenshot == 7
+        assert parsed.meta.ngh == 101
+        assert struct.unpack_from("<I", rewritten, 0x28)[0] == 101
+        assert struct.unpack_from("<I", rewritten, 0x1C)[0] == 1994
+        assert struct.unpack_from("<I", rewritten, 0x20)[0] == 9
+
     def test_rom_data_preserved(self):
         rs = make_romset()
         neo = make_neo(rs)
@@ -280,10 +337,10 @@ class TestBuildParseNeo:
         struct.pack_into("<I", h, 0x10, 3)
         struct.pack_into("<I", h, 0x14, 2)
         struct.pack_into("<I", h, 0x18, 0)
-        struct.pack_into("<H", h, 0x1C, 1999)
-        struct.pack_into("<H", h, 0x1E, 0)
+        struct.pack_into("<I", h, 0x1C, 1999)
         struct.pack_into("<I", h, 0x20, 0)
         struct.pack_into("<I", h, 0x24, 0)
+        struct.pack_into("<I", h, 0x28, 0)
         neo = bytes(h) + b"AAA" + b"bb"
         with pytest.warns(UserWarning, match="splits the V ROM"):
             rs = parse_neo(neo)
@@ -374,10 +431,10 @@ class TestNeoMetadataEdit:
         struct.pack_into("<I", h, 0x10, 3)
         struct.pack_into("<I", h, 0x14, 2)
         struct.pack_into("<I", h, 0x18, 0)
-        struct.pack_into("<H", h, 0x1C, 1999)
-        struct.pack_into("<H", h, 0x1E, 0)
+        struct.pack_into("<I", h, 0x1C, 1999)
         struct.pack_into("<I", h, 0x20, 0)
         struct.pack_into("<I", h, 0x24, 0)
+        struct.pack_into("<I", h, 0x28, 0)
         neo = bytes(h) + b"AAA" + b"bb"
         with pytest.warns(UserWarning, match="splits the V ROM"):
             rs = parse_neo(neo)
@@ -493,6 +550,44 @@ class TestCoreEdgeCases:
         with pytest.warns(UserWarning, match="No text-layer ROM"):
             rs = parse_mame_zip(z)
         assert len(rs.s) == 0x40000
+        assert len(rs.c) == C_BANK_SIZE  # interleaved pair of half-size chips
+
+    def test_parse_mame_zip_kof10th_merges_c1a_c1b_parts(self, tmp_path):
+        """Split C parts (c1a+c1b) are concatenated before interleaving."""
+        z = tmp_path / "kf10_full.zip"
+        half = C_BANK_SIZE // 2
+        c1a = make_rom(half, 0x11)
+        c1b = make_rom(half, 0x12)
+        c2a = make_rom(half, 0x21)
+        c2b = make_rom(half, 0x22)
+        with zipfile.ZipFile(z, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("kf10-p1.bin", make_rom(1024, 1))
+            zf.writestr("kf10-m1.bin", make_rom(1024, 3))
+            zf.writestr("kf10-v1.bin", make_rom(1024, 4))
+            zf.writestr("kf10-c1a.bin", c1a)
+            zf.writestr("kf10-c1b.bin", c1b)
+            zf.writestr("kf10-c2a.bin", c2a)
+            zf.writestr("kf10-c2b.bin", c2b)
+        with pytest.warns(UserWarning, match="No text-layer ROM"):
+            rs = parse_mame_zip(z)
+        assert len(rs.s) == 0x40000
+        assert rs.c == interleave_c_chips([c1a + c1b, c2a + c2b])
+
+    def test_roles_to_romset_rejects_synthetic_s_without_c(self):
+        with pytest.warns(UserWarning, match="No text-layer ROM"):
+            with pytest.raises(InvalidRomLayoutError, match="No C sprite ROM"):
+                roles_to_romset(
+                    {
+                        "P": b"x" * 4096,
+                        "M": b"y" * 1024,
+                    },
+                    source="empty-c.zip",
+                    source_filenames=(
+                        "kf10-p1.bin",
+                        "kf10-m1.bin",
+                        "kf10-c1a.bin",  # implies C1 / synthetic S, but no C bytes stored
+                    ),
+                )
 
     def test_parse_mame_zip_encrypted_without_c1r_inserts_128k_zero_s(self, tmp_path):
         z = tmp_path / "sam5ish.zip"
