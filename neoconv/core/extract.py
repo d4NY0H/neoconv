@@ -5,7 +5,9 @@ from __future__ import annotations
 import io
 import warnings
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import Optional
 
 from .constants import C_CHIP_SIZE_DEFAULT, V_BANK_SIZE
 from .models import RomSet
@@ -34,6 +36,11 @@ def _warn_v_bank_size_remainder(romset: RomSet, v_bank_size: int) -> None:
         )
 
 
+def _poll_cancel(cancel_check: Optional[Callable[[], None]]) -> None:
+    if cancel_check is not None:
+        cancel_check()
+
+
 def extract_romset(
     romset: RomSet,
     output_dir: Path,
@@ -41,6 +48,8 @@ def extract_romset(
     fmt: str = "mame",
     c_chip_size: int = C_CHIP_SIZE_DEFAULT,
     v_bank_size: int = V_BANK_SIZE,
+    *,
+    cancel_check: Optional[Callable[[], None]] = None,
 ) -> dict[str, Path]:
     """
     Extract a parsed RomSet into individual ROM files.
@@ -54,6 +63,8 @@ def extract_romset(
     c_chip_size  : size of each C chip in bytes (default 2 MB).
                    Use 4 MB for games with larger C chips (e.g. Neo Turf Masters).
     v_bank_size  : size of each V chunk in bytes (default 2 MB).
+    cancel_check : optional callback invoked between ROM writes; raise
+                   :class:`~neoconv.core.UserCancelledError` to abort.
 
     Returns dict mapping role -> output Path.
     """
@@ -63,6 +74,7 @@ def extract_romset(
     written: dict[str, Path] = {}
 
     def _write_rom(role: str, data: bytes, suffix: str = "") -> Path:
+        _poll_cancel(cancel_check)
         fname = f"{name_prefix}-{role}{suffix}{ext}"
         p = output_dir / fname
         warn_overwriting_path(p, stacklevel=5)
@@ -80,6 +92,7 @@ def extract_romset(
     for i, chip in enumerate(romset.c_chips(chip_size=c_chip_size), start=1):
         _write_rom("c", chip, suffix=str(i))
 
+    _poll_cancel(cancel_check)
     return written
 
 
@@ -90,6 +103,8 @@ def extract_neo(
     fmt: str = "mame",
     c_chip_size: int = C_CHIP_SIZE_DEFAULT,
     v_bank_size: int = V_BANK_SIZE,
+    *,
+    cancel_check: Optional[Callable[[], None]] = None,
 ) -> dict[str, Path]:
     """
     Extract a .neo file into individual ROM files.
@@ -103,6 +118,7 @@ def extract_neo(
     c_chip_size  : size of each C chip in bytes (default 2 MB).
                    Use 4 MB for games with larger C chips (e.g. Neo Turf Masters).
     v_bank_size  : size of each V chunk in bytes (default 2 MB).
+    cancel_check : optional cancellation callback (see :func:`extract_romset`).
 
     Returns dict mapping role -> output Path.
     """
@@ -114,6 +130,7 @@ def extract_neo(
         fmt=fmt,
         c_chip_size=c_chip_size,
         v_bank_size=v_bank_size,
+        cancel_check=cancel_check,
     )
 
 
@@ -123,6 +140,8 @@ def extract_romset_to_zip(
     fmt: str = "mame",
     c_chip_size: int = C_CHIP_SIZE_DEFAULT,
     v_bank_size: int = V_BANK_SIZE,
+    *,
+    cancel_check: Optional[Callable[[], None]] = None,
 ) -> bytes:
     """
     Like extract_romset but returns a ZIP archive as bytes.
@@ -132,20 +151,27 @@ def extract_romset_to_zip(
     c_chip_size : size of each C chip in bytes (default 2 MB).
                   Use 4 MB for games with larger C chips (e.g. Neo Turf Masters).
     v_bank_size : size of each V chunk in bytes (default 2 MB).
+    cancel_check : optional cancellation callback (see :func:`extract_romset`).
     """
     _warn_v_bank_size_remainder(romset, v_bank_size)
     ext = ".bin" if fmt == "mame" else ".rom"
     buf = io.BytesIO()
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        _poll_cancel(cancel_check)
         zf.writestr(f"{name_prefix}-p1{ext}", romset.p)
+        _poll_cancel(cancel_check)
         zf.writestr(f"{name_prefix}-s1{ext}", romset.s)
+        _poll_cancel(cancel_check)
         zf.writestr(f"{name_prefix}-m1{ext}", romset.m)
         for i, chunk in enumerate(romset.v_chunks(bank_size=v_bank_size), start=1):
+            _poll_cancel(cancel_check)
             zf.writestr(f"{name_prefix}-v{i}{ext}", chunk)
         for i, chip in enumerate(romset.c_chips(chip_size=c_chip_size), start=1):
+            _poll_cancel(cancel_check)
             zf.writestr(f"{name_prefix}-c{i}{ext}", chip)
 
+    _poll_cancel(cancel_check)
     return buf.getvalue()
 
 
@@ -155,6 +181,8 @@ def extract_neo_to_zip(
     fmt: str = "mame",
     c_chip_size: int = C_CHIP_SIZE_DEFAULT,
     v_bank_size: int = V_BANK_SIZE,
+    *,
+    cancel_check: Optional[Callable[[], None]] = None,
 ) -> bytes:
     """Like extract_neo but returns a ZIP archive as bytes.
 
@@ -163,6 +191,7 @@ def extract_neo_to_zip(
     c_chip_size : size of each C chip in bytes (default 2 MB).
                   Use 4 MB for games with larger C chips (e.g. Neo Turf Masters).
     v_bank_size : size of each V chunk in bytes (default 2 MB).
+    cancel_check : optional cancellation callback (see :func:`extract_romset`).
     """
     romset = parse_neo(neo_data)
     return extract_romset_to_zip(
@@ -171,6 +200,7 @@ def extract_neo_to_zip(
         fmt=fmt,
         c_chip_size=c_chip_size,
         v_bank_size=v_bank_size,
+        cancel_check=cancel_check,
     )
 
 

@@ -217,7 +217,7 @@ def cmd_detect_swap(args: argparse.Namespace) -> None:
         print(f"Inspecting P-ROM file: {src}  ({len(p_rom):,} bytes)")
 
     needed, reason = detect_swap_p_needed(p_rom)
-    print(f"  Result  : {'--swap-p yes  ← required' if needed else '--swap-p no   (default)'}")
+    print(f"  Result  : {'--swap-p yes  ← required' if needed else '--swap-p no   ← not needed'}")
     print(f"  Reason  : {reason}")
 
 

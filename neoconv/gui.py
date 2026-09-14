@@ -628,6 +628,10 @@ class ExtractTab(ttk.Frame):
                     raise UserCancelledError("Operation cancelled by user.")
 
                 extract_warnings: list[warnings.WarningMessage] = []
+                def _extract_cancel_check() -> None:
+                    if self._cancel_event.is_set():
+                        raise UserCancelledError("Operation cancelled by user.")
+
                 with warnings.catch_warnings(record=True) as caught:
                     warnings.simplefilter("always")
                     if mode == "dir":
@@ -640,6 +644,7 @@ class ExtractTab(ttk.Frame):
                             fmt=fmt,
                             c_chip_size=c_chip_size,
                             v_bank_size=v_bank_size,
+                            cancel_check=_extract_cancel_check,
                         )
                     else:
                         dest = Path(self._out_zip.value) if self._out_zip.value \
@@ -651,12 +656,18 @@ class ExtractTab(ttk.Frame):
                             fmt=fmt,
                             c_chip_size=c_chip_size,
                             v_bank_size=v_bank_size,
+                            cancel_check=_extract_cancel_check,
                         )
+                        if self._cancel_event.is_set():
+                            raise UserCancelledError("Operation cancelled by user.")
                         write_bytes_atomic(dest, zip_data)
                         written = None
                 extract_warnings.extend(caught)
                 for wm in extract_warnings:
                     self._wbridge.post_log(f"[WARN] {wm.message}")
+
+                if self._cancel_event.is_set():
+                    raise UserCancelledError("Operation cancelled by user.")
 
                 if mode == "dir":
                     self._wbridge.post_log(f"Extracted {len(written)} files to: {out_dir}")

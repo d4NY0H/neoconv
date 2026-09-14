@@ -270,7 +270,9 @@ def test_cmd_detect_swap_from_zip(monkeypatch, tmp_path, capsys):
     cli.cmd_detect_swap(argparse.Namespace(input=str(zpath)))
     out = capsys.readouterr().out
     assert "Inspecting P-ROM from ZIP:" in out
-    assert "default" in out
+    assert "--swap-p no" in out
+    assert "not needed" in out
+    assert "(default)" not in out
     assert "ok heuristic" in out
 
 

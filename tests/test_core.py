@@ -24,6 +24,7 @@ from neoconv.core import (
     RomSet,
     SwapMode,
     P_SWAP_SIZE,
+    UserCancelledError,
     apply_swap_p,
     check_m68k_vectors,
     interleave_c_chips,
@@ -795,6 +796,34 @@ class TestExtractNeoToZip:
         extract_romset(rs, out_dir, name_prefix="g", fmt="mame")
         with pytest.warns(UserWarning, match="Overwriting"):
             extract_romset(rs, out_dir, name_prefix="g", fmt="mame")
+
+    def test_extract_romset_cancel_check_aborts_between_writes(self, tmp_path):
+        rs = make_romset()
+        out_dir = tmp_path / "partial"
+        calls = {"n": 0}
+
+        def cancel_after_first() -> None:
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise UserCancelledError("stop")
+
+        with pytest.raises(UserCancelledError, match="stop"):
+            extract_romset(rs, out_dir, name_prefix="g", fmt="mame", cancel_check=cancel_after_first)
+        # First ROM (p1) written; later ones aborted.
+        assert (out_dir / "g-p1.bin").exists()
+        assert not (out_dir / "g-s1.bin").exists()
+
+    def test_extract_romset_to_zip_cancel_check_aborts(self):
+        rs = make_romset()
+        calls = {"n": 0}
+
+        def cancel_after_p() -> None:
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise UserCancelledError("stop")
+
+        with pytest.raises(UserCancelledError, match="stop"):
+            extract_romset_to_zip(rs, name_prefix="g", fmt="mame", cancel_check=cancel_after_p)
 
 
 # ---------------------------------------------------------------------------
