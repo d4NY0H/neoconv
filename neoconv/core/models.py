@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import enum
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Optional
 
 from .constants import C_CHIP_SIZE_DEFAULT, GENRES, NEO_HEADER_SIZE, V_BANK_SIZE
 from .exceptions import InvalidConfigurationError
@@ -89,15 +91,43 @@ class RomSet:
     c: bytes = b""  # all C data interleaved (as stored in .neo)
     meta: NeoMeta = field(default_factory=NeoMeta)
 
-    def v_chunks(self, bank_size: int = V_BANK_SIZE) -> list[bytes]:
+    def v_chunks(
+        self,
+        bank_size: int = V_BANK_SIZE,
+        *,
+        bank_sizes: Optional[Sequence[int]] = None,
+    ) -> list[bytes]:
         """
-        Split V data into fixed-size chunks (``v1``, ``v2``, …).
+        Split V data into chunks (``v1``, ``v2``, …).
 
         Parameters
         ----------
-        bank_size : size of each V chunk in bytes (default 2 MB, MAME standard).
-                    Use 4 MB or other sizes when the MAME set uses larger V ROMs.
+        bank_size : uniform size of each V chunk in bytes (default 2 MB).
+                    Ignored when *bank_sizes* is provided.
+        bank_sizes : explicit per-file sizes in order. Sum must equal ``len(V)``.
         """
+        if bank_sizes is not None:
+            sizes = list(bank_sizes)
+            if not sizes:
+                raise InvalidConfigurationError("V bank size list must not be empty.")
+            if any(s <= 0 for s in sizes):
+                raise InvalidConfigurationError(
+                    f"V bank sizes must be positive (got {sizes})."
+                )
+            expected = sum(sizes)
+            if expected != len(self.v):
+                raise InvalidConfigurationError(
+                    f"V ROM size ({len(self.v):,} bytes) does not match the sum of "
+                    f"--v-bank-sizes ({expected:,} bytes).",
+                    hint="List every v1, v2, … size from MAME neogeo.xml in order.",
+                )
+            chunks: list[bytes] = []
+            offset = 0
+            for size in sizes:
+                chunks.append(self.v[offset : offset + size])
+                offset += size
+            return chunks
+
         if bank_size <= 0:
             raise InvalidConfigurationError(f"V bank size must be positive (got {bank_size}).")
         chunks = []
@@ -105,7 +135,12 @@ class RomSet:
             chunks.append(self.v[i : i + bank_size])
         return chunks
 
-    def c_chips(self, chip_size: int = C_CHIP_SIZE_DEFAULT) -> list[bytes]:
+    def c_chips(
+        self,
+        chip_size: int = C_CHIP_SIZE_DEFAULT,
+        *,
+        chip_sizes: Optional[Sequence[int]] = None,
+    ) -> list[bytes]:
         """
         De-interleave C ROM into individual chip images.
 
@@ -118,17 +153,59 @@ class RomSet:
 
         Parameters
         ----------
-        chip_size : size of each individual chip in bytes.
+        chip_size : uniform size of each individual chip in bytes.
                     Default 2 MB covers most Neo Geo games.
-                    Use 4 MB for games with larger C chips (e.g. Neo Turf Masters).
-                    When in doubt, check the MAME ROM set for the expected chip sizes.
+                    Ignored when *chip_sizes* is provided.
+        chip_sizes : explicit per-chip sizes in order (c1, c2, c3, c4, …).
+                     Adjacent pair sizes must match; sum of chip sizes
+                     must equal ``len(C)``.
         """
+        if chip_sizes is not None:
+            sizes = list(chip_sizes)
+            if not sizes:
+                raise InvalidConfigurationError("C chip size list must not be empty.")
+            if any(s <= 0 for s in sizes):
+                raise InvalidConfigurationError(
+                    f"C chip sizes must be positive (got {sizes})."
+                )
+            if len(sizes) % 2 != 0:
+                raise InvalidConfigurationError(
+                    f"Odd number of C chip sizes ({len(sizes)}). "
+                    "Sizes must come in pairs (c1+c2, c3+c4, ...).",
+                    hint="Use --c-chip-sizes with an even count matching the MAME set.",
+                )
+            for i in range(0, len(sizes), 2):
+                if sizes[i] != sizes[i + 1]:
+                    raise InvalidConfigurationError(
+                        f"C chip pair c{i + 1}/c{i + 2} size mismatch in list: "
+                        f"{sizes[i]} vs {sizes[i + 1]} bytes.",
+                        hint="Paired chips must share the same size.",
+                    )
+            # Two chips of size S → interleaved bank of 2*S; sum(chip sizes) == len(C).
+            expected = sum(sizes)
+            if expected != len(self.c):
+                raise InvalidConfigurationError(
+                    f"C ROM size ({len(self.c):,} bytes) does not match the sum of "
+                    f"--c-chip-sizes ({expected:,} bytes).",
+                    hint="List every c1, c2, … size from MAME neogeo.xml in order.",
+                )
+            chips: list[bytes] = []
+            offset = 0
+            for i in range(0, len(sizes), 2):
+                pair_size = sizes[i]
+                bank_size = pair_size * 2
+                bank = self.c[offset : offset + bank_size]
+                chips.append(bytes(bank[0::2]))
+                chips.append(bytes(bank[1::2]))
+                offset += bank_size
+            return chips
+
         bank_size = chip_size * 2
         if len(self.c) % bank_size != 0:
             raise InvalidConfigurationError(
                 f"C ROM size ({len(self.c):,} bytes) is not a multiple of "
                 f"chip_size*2 ({bank_size:,} bytes). "
-                f"Try a different --c-chip-size value.",
+                f"Try a different --c-chip-size value, or --c-chip-sizes for mixed sets.",
                 hint="Check per-chip sizes in MAME neogeo.xml (see --c-chip-size).",
             )
         chips = []

@@ -196,6 +196,95 @@ class TestCRomInterleaving:
                 # C2 intentionally missing
             })
 
+    def test_mixed_c_chip_sizes_roundtrip(self):
+        """trally-style: 1 MiB pair + 512 KiB pair."""
+        one_m = 1024 * 1024
+        half_m = 512 * 1024
+        c1 = make_rom(one_m, 0x11)
+        c2 = make_rom(one_m, 0x22)
+        c3 = make_rom(half_m, 0x33)
+        c4 = make_rom(half_m, 0x44)
+        interleaved = interleave_c_chips([c1, c2, c3, c4])
+        assert len(interleaved) == 3 * 1024 * 1024
+        rs = RomSet(c=interleaved)
+        chips = rs.c_chips(chip_sizes=[one_m, one_m, half_m, half_m])
+        assert chips == [c1, c2, c3, c4]
+
+    def test_mixed_c_chip_sizes_uniform_small_silently_wrong_vs_list(self):
+        """Single 512 KiB size divides 3 MiB but yields six wrong chips."""
+        one_m = 1024 * 1024
+        half_m = 512 * 1024
+        c1 = make_rom(one_m, 0x11)
+        c2 = make_rom(one_m, 0x22)
+        c3 = make_rom(half_m, 0x33)
+        c4 = make_rom(half_m, 0x44)
+        interleaved = interleave_c_chips([c1, c2, c3, c4])
+        rs = RomSet(c=interleaved)
+        wrong = rs.c_chips(chip_size=half_m)
+        assert len(wrong) == 6
+        assert wrong != [c1, c2, c3, c4]
+        assert rs.c_chips(chip_sizes=[one_m, one_m, half_m, half_m]) == [c1, c2, c3, c4]
+
+    def test_c_chip_sizes_sum_mismatch_raises(self):
+        rs = RomSet(c=make_rom(1024 * 1024, 0xFF))
+        with pytest.raises(InvalidConfigurationError, match="does not match the sum"):
+            rs.c_chips(chip_sizes=[512 * 1024, 512 * 1024, 512 * 1024, 512 * 1024])
+
+    def test_c_chip_sizes_odd_count_raises(self):
+        rs = RomSet(c=make_rom(1024 * 1024, 0xFF))
+        with pytest.raises(InvalidConfigurationError, match="Odd number"):
+            rs.c_chips(chip_sizes=[512 * 1024, 512 * 1024, 512 * 1024])
+
+    def test_c_chip_sizes_unequal_pair_raises(self):
+        rs = RomSet(c=make_rom(1024 * 1024 + 512 * 1024, 0xFF))
+        with pytest.raises(InvalidConfigurationError, match="size mismatch in list"):
+            rs.c_chips(chip_sizes=[1024 * 1024, 512 * 1024])
+
+    def test_mixed_v_bank_sizes_roundtrip(self):
+        one_m = 1024 * 1024
+        half_m = 512 * 1024
+        v1 = make_rom(one_m, 0xA1)
+        v2 = make_rom(half_m, 0xA2)
+        rs = RomSet(v=v1 + v2)
+        assert rs.v_chunks(bank_sizes=[one_m, half_m]) == [v1, v2]
+
+    def test_v_bank_sizes_sum_mismatch_raises(self):
+        rs = RomSet(v=make_rom(1024 * 1024, 0xFF))
+        with pytest.raises(InvalidConfigurationError, match="does not match the sum"):
+            rs.v_chunks(bank_sizes=[512 * 1024, 512 * 1024, 512 * 1024])
+
+    def test_extract_romset_honours_mixed_size_lists(self, tmp_path):
+        one_m = 1024 * 1024
+        half_m = 512 * 1024
+        c1 = make_rom(one_m, 0x11)
+        c2 = make_rom(one_m, 0x22)
+        c3 = make_rom(half_m, 0x33)
+        c4 = make_rom(half_m, 0x44)
+        v1 = make_rom(one_m, 0xA1)
+        v2 = make_rom(half_m, 0xA2)
+        rs = RomSet(
+            p=make_rom(4096, 1),
+            s=make_rom(128 * 1024, 2),
+            m=make_rom(128 * 1024, 3),
+            v=v1 + v2,
+            c=interleave_c_chips([c1, c2, c3, c4]),
+        )
+        out = tmp_path / "out"
+        written = extract_romset(
+            rs,
+            out,
+            name_prefix="038",
+            fmt="mame",
+            c_chip_sizes=[one_m, one_m, half_m, half_m],
+            v_bank_sizes=[one_m, half_m],
+        )
+        assert written["c1"].read_bytes() == c1
+        assert written["c2"].read_bytes() == c2
+        assert written["c3"].read_bytes() == c3
+        assert written["c4"].read_bytes() == c4
+        assert written["v1"].read_bytes() == v1
+        assert written["v2"].read_bytes() == v2
+
     def test_v_rom_gap_raises(self):
         base = {
             "P": make_rom(512 * 1024),

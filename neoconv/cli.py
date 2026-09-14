@@ -92,6 +92,25 @@ def _print_cli_warnings(caught: list[warnings.WarningMessage]) -> None:
         print(f"Warning: {wm.message}", file=sys.stderr)
 
 
+def _parse_size_list(value: str) -> list[int]:
+    """Parse a comma-separated list of positive byte sizes for argparse."""
+    parts = [p.strip() for p in value.split(",") if p.strip()]
+    if not parts:
+        raise argparse.ArgumentTypeError("size list must not be empty")
+    sizes: list[int] = []
+    for part in parts:
+        try:
+            n = int(part, 0)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                f"invalid size '{part}' (expected integer bytes)"
+            ) from exc
+        if n <= 0:
+            raise argparse.ArgumentTypeError(f"size must be positive (got {n})")
+        sizes.append(n)
+    return sizes
+
+
 def _print_neo_info(neo_data: bytes) -> RomSet:
     romset = parse_neo(neo_data)
     print(romset.meta.format_info(romset))
@@ -108,6 +127,19 @@ def cmd_extract(args: argparse.Namespace) -> None:
         print(f"Error: file not found: {neo_path}", file=sys.stderr)
         sys.exit(1)
 
+    if args.c_chip_sizes is not None and args.c_chip_size != 0:
+        print(
+            "Error: use either --c-chip-size or --c-chip-sizes, not both.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if args.v_bank_sizes is not None and args.v_bank_size != 0:
+        print(
+            "Error: use either --v-bank-size or --v-bank-sizes, not both.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     neo_data = neo_path.read_bytes()
     print(f"Reading: {neo_path}")
     _rs = _print_neo_info(neo_data)
@@ -116,11 +148,19 @@ def cmd_extract(args: argparse.Namespace) -> None:
     prefix = args.prefix or neo_path.stem
     fmt    = args.format  # 'mame' or 'darksoft'
 
-    # c_chip_size / v_bank_size: 0 means default 2 MB (MAME standard)
+    c_chip_sizes = args.c_chip_sizes
+    v_bank_sizes = args.v_bank_sizes
+    # c_chip_size / v_bank_size: 0 means default 2 MB (MAME standard); ignored when lists set.
     c_chip_size = args.c_chip_size if args.c_chip_size > 0 else C_CHIP_SIZE_DEFAULT
     v_bank_size = args.v_bank_size if args.v_bank_size > 0 else V_BANK_SIZE
-    print(f"V bank size: {v_bank_size:,} bytes")
-    print(f"C chip size: {c_chip_size:,} bytes")
+    if c_chip_sizes is not None:
+        print(f"C chip sizes: {', '.join(f'{s:,}' for s in c_chip_sizes)} bytes")
+    else:
+        print(f"C chip size: {c_chip_size:,} bytes")
+    if v_bank_sizes is not None:
+        print(f"V bank sizes: {', '.join(f'{s:,}' for s in v_bank_sizes)} bytes")
+    else:
+        print(f"V bank size: {v_bank_size:,} bytes")
 
     written: dict | None = None
     out_path: Path | None = None
@@ -136,6 +176,8 @@ def cmd_extract(args: argparse.Namespace) -> None:
                 fmt=fmt,
                 c_chip_size=c_chip_size,
                 v_bank_size=v_bank_size,
+                c_chip_sizes=c_chip_sizes,
+                v_bank_sizes=v_bank_sizes,
             )
         else:
             out_path = Path(args.out) if args.out else neo_path.with_suffix(
@@ -148,6 +190,8 @@ def cmd_extract(args: argparse.Namespace) -> None:
                 fmt=fmt,
                 c_chip_size=c_chip_size,
                 v_bank_size=v_bank_size,
+                c_chip_sizes=c_chip_sizes,
+                v_bank_sizes=v_bank_sizes,
             )
             write_bytes_atomic(out_path, zip_data)
     _print_cli_warnings(caught)
@@ -305,15 +349,38 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Size of each C chip in bytes for de-interleaving (default: 0 = 2097152 / 2 MB). "
             "Use 4194304 (4 MB) for games with larger chips (e.g. Neo Turf Masters). "
-            "Chip size cannot be inferred from the .neo alone — check the MAME ROM set."
+            "Chip size cannot be inferred from the .neo alone — check the MAME ROM set. "
+            "For mixed pair sizes use --c-chip-sizes instead."
         )
+    )
+    p_extract.add_argument(
+        "--c-chip-sizes",
+        type=_parse_size_list,
+        default=None,
+        metavar="BYTES,BYTES,...",
+        help=(
+            "Comma-separated per-chip C sizes in order (c1,c2,c3,c4,…). "
+            "Required for sets with mixed C pair sizes (e.g. trally: "
+            "1048576,1048576,524288,524288). Cannot be combined with --c-chip-size."
+        ),
     )
     p_extract.add_argument(
         "--v-bank-size", type=int, default=0, metavar="BYTES",
         help=(
             "Size of each V ROM chunk in bytes when splitting to v1, v2, ... "
             "(default: 0 = 2097152 / 2 MB). Use 4194304 (4 MB) or other sizes when "
-            "the MAME set uses non-standard V chips."
+            "the MAME set uses non-standard V chips. "
+            "For mixed V sizes use --v-bank-sizes instead."
+        ),
+    )
+    p_extract.add_argument(
+        "--v-bank-sizes",
+        type=_parse_size_list,
+        default=None,
+        metavar="BYTES,BYTES,...",
+        help=(
+            "Comma-separated per-file V sizes in order (v1,v2,…). "
+            "Required for sets with unequal V ROMs. Cannot be combined with --v-bank-size."
         ),
     )
     p_extract.set_defaults(func=cmd_extract)

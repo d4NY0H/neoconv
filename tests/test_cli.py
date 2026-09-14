@@ -72,6 +72,8 @@ def test_cmd_extract_writes_zip(monkeypatch, tmp_path, capsys):
         out_dir="",
         c_chip_size=2_097_152,
         v_bank_size=0,
+        c_chip_sizes=None,
+        v_bank_sizes=None,
     )
     cli.cmd_extract(args)
     assert len(atomic_calls) == 1
@@ -103,6 +105,8 @@ def test_cmd_extract_out_dir_lists_files(monkeypatch, tmp_path, capsys):
         out_dir=str(out_dir),
         c_chip_size=2_097_152,
         v_bank_size=0,
+        c_chip_sizes=None,
+        v_bank_sizes=None,
     )
     cli.cmd_extract(args)
     out = capsys.readouterr().out
@@ -136,6 +140,8 @@ def test_cmd_extract_default_c_chip_size(monkeypatch, tmp_path, capsys):
         out_dir="",
         c_chip_size=0,
         v_bank_size=0,
+        c_chip_sizes=None,
+        v_bank_sizes=None,
     )
     cli.cmd_extract(args)
     assert out_zip.exists()
@@ -162,6 +168,8 @@ def test_cmd_extract_v_bank_size_passed_to_zip(monkeypatch, tmp_path, capsys):
             out_dir="",
             c_chip_size=2_097_152,
             v_bank_size=4_194_304,
+            c_chip_sizes=None,
+            v_bank_sizes=None,
         )
     )
     assert captured.get("v_bank_size") == 4_194_304
@@ -178,6 +186,8 @@ def test_cmd_extract_missing_file_exits(monkeypatch, tmp_path):
         out_dir="",
         c_chip_size=2_097_152,
         v_bank_size=0,
+        c_chip_sizes=None,
+        v_bank_sizes=None,
     )
     with pytest.raises(SystemExit) as exc:
         cli.cmd_extract(args)
@@ -188,6 +198,104 @@ def test_build_parser_extract_v_bank_size():
     parser = cli.build_parser()
     args = parser.parse_args(["extract", "game.neo", "--v-bank-size", "4194304"])
     assert args.v_bank_size == 4_194_304
+
+
+def test_build_parser_extract_size_lists():
+    parser = cli.build_parser()
+    args = parser.parse_args(
+        [
+            "extract",
+            "game.neo",
+            "--c-chip-sizes",
+            "1048576,1048576,524288,524288",
+            "--v-bank-sizes",
+            "1048576,524288",
+        ]
+    )
+    assert args.c_chip_sizes == [1048576, 1048576, 524288, 524288]
+    assert args.v_bank_sizes == [1048576, 524288]
+
+
+def test_cmd_extract_passes_size_lists(monkeypatch, tmp_path, capsys):
+    neo = tmp_path / "game.neo"
+    neo.write_bytes(b"fakedata")
+    captured: dict = {}
+
+    def _capture(*_a, **kw):
+        captured.update(kw)
+        return _mini_zip_bytes()
+
+    monkeypatch.setattr(cli, "_print_neo_info", lambda *_: None)
+    monkeypatch.setattr(cli, "extract_neo_to_zip", _capture)
+    cli.cmd_extract(
+        argparse.Namespace(
+            neo_file=str(neo),
+            prefix="x",
+            format="mame",
+            out=str(tmp_path / "out.zip"),
+            out_dir="",
+            c_chip_size=0,
+            v_bank_size=0,
+            c_chip_sizes=[1048576, 1048576, 524288, 524288],
+            v_bank_sizes=[1048576, 524288],
+        )
+    )
+    assert captured["c_chip_sizes"] == [1048576, 1048576, 524288, 524288]
+    assert captured["v_bank_sizes"] == [1048576, 524288]
+    out = capsys.readouterr().out
+    assert "C chip sizes:" in out
+    assert "V bank sizes:" in out
+
+
+def test_cmd_extract_rejects_c_size_and_sizes_together(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli.sys, "exit", _exit_raiser)
+    neo = tmp_path / "game.neo"
+    neo.write_bytes(b"x")
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_extract(
+            argparse.Namespace(
+                neo_file=str(neo),
+                prefix="",
+                format="mame",
+                out="",
+                out_dir="",
+                c_chip_size=2097152,
+                v_bank_size=0,
+                c_chip_sizes=[2097152, 2097152],
+                v_bank_sizes=None,
+            )
+        )
+    assert exc.value.code == 1
+
+
+def test_cmd_extract_rejects_v_size_and_sizes_together(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli.sys, "exit", _exit_raiser)
+    neo = tmp_path / "game.neo"
+    neo.write_bytes(b"x")
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_extract(
+            argparse.Namespace(
+                neo_file=str(neo),
+                prefix="",
+                format="mame",
+                out="",
+                out_dir="",
+                c_chip_size=0,
+                v_bank_size=2097152,
+                c_chip_sizes=None,
+                v_bank_sizes=[2097152],
+            )
+        )
+    assert exc.value.code == 1
+
+
+def test_parse_size_list_accepts_hex():
+    assert cli._parse_size_list("0x100000,0x80000") == [1048576, 524288]
+
+
+def test_parse_size_list_rejects_empty():
+    with pytest.raises(argparse.ArgumentTypeError):
+        cli._parse_size_list("  ,  ")
 
 
 def test_cmd_pack_from_directory(monkeypatch, tmp_path, capsys):

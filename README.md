@@ -164,7 +164,7 @@ Tabs:
 | Tab | Description |
 |-----|-------------|
 | **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap via radio (`auto` / `yes` / `no`). Status line checks mandatory P/S/M roles and warns on **V/C filename gaps** before pack |
-| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory; **C Chip Size** / **V Bank Size** dropdowns (presets 512 KB–20 MB / 16 MB). Arbitrary byte sizes: CLI only (`--c-chip-size`, `--v-bank-size`) |
+| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory; **C Chip Size** / **V Bank Size** dropdowns (presets 512 KB–20 MB / 16 MB). Arbitrary / mixed sizes: CLI (`--c-chip-size(s)`, `--v-bank-size(s)`) |
 | **Edit** | Load header fields from a `.neo`, adjust metadata (name/manufacturer truncated to header limits), write back (optional separate output path) |
 | **Info** | Inspect metadata, ROM region sizes, and **MD5 per region** (P, S, M, V, C) |
 
@@ -201,6 +201,12 @@ neoconv extract input.neo --prefix game --c-chip-size 4194304 --out game_customc
 
 # Explicit V bank size (example: 4 MB v1/v2 chunks)
 neoconv extract input.neo --prefix game --v-bank-size 4194304 --out game_v4m.zip
+
+# Mixed C / V sizes (e.g. Thrash Rally / trally) — CLI only; GUI has a single size
+neoconv extract trally.neo --prefix 038 \
+  --c-chip-sizes 1048576,1048576,524288,524288 \
+  --v-bank-sizes 1048576,524288 \
+  --out-dir ./trally_out/
 ```
 
 | Option | Default | Description |
@@ -209,8 +215,10 @@ neoconv extract input.neo --prefix game --v-bank-size 4194304 --out game_v4m.zip
 | `--format`, `-f` | `mame` | Output format: `mame` (`.bin`) or `darksoft` (`.rom`) |
 | `--out`, `-o` | *(auto)* | Output ZIP path (ignored if `--out-dir` is set) |
 | `--out-dir`, `-d` | — | Extract to directory instead of ZIP; **wins over `--out`** when both are given |
-| `--c-chip-size` | `0` (= `2097152`) | Size of **each C chip** in **bytes** before interleaving. `0` = 2 MB. GUI presets match [common sizes](#common-extract-sizes-cli-bytes). **CLI:** any positive byte value. See [C-ROM interleaving](#c-rom-interleaving) |
-| `--v-bank-size` | `0` (= `2097152`) | Size of **each V file** (`v1`, `v2`, …) in **bytes**. `0` = 2 MB. GUI presets match [common sizes](#common-extract-sizes-cli-bytes). See [V-ROM chunking](#v-rom-chunking) |
+| `--c-chip-size` | `0` (= `2097152`) | Uniform size of **each C chip** in **bytes**. `0` = 2 MB. GUI presets match [common sizes](#common-extract-sizes-cli-bytes). See [C-ROM interleaving](#c-rom-interleaving) |
+| `--c-chip-sizes` | — | Comma-separated per-chip sizes (`c1,c2,c3,c4,…`) for **mixed** C pairs. Cannot combine with `--c-chip-size`. **CLI only** (GUI still uses a single size). |
+| `--v-bank-size` | `0` (= `2097152`) | Uniform size of **each V file** (`v1`, `v2`, …) in **bytes**. `0` = 2 MB. See [V-ROM chunking](#v-rom-chunking) |
+| `--v-bank-sizes` | — | Comma-separated per-file V sizes (`v1,v2,…`) for **mixed** V ROMs. Cannot combine with `--v-bank-size`. **CLI only**. |
 
 **Overwrite behaviour:** Existing output files are replaced without prompting. A **warning** is printed (CLI: stderr; GUI: log) for each path that already exists. Directory extract updates files in place; ZIP output is replaced atomically (see [Atomic file writes](#atomic-file-writes)).
 
@@ -464,9 +472,17 @@ On **extract**, if unset, **neoconv** assumes **2 MB** per chip (`2097152` bytes
 
 | | When unset | GUI presets | CLI |
 |---|------------|-------------|-----|
-| **C chip** (`c1`, `c2`, …) | 2 MB (`2097152`) | 512 KB – 20 MB | any positive byte value; `0` = `2097152` |
+| **C chip** (`c1`, `c2`, …) | 2 MB (`2097152`) | 512 KB – 20 MB | `--c-chip-size` any positive byte value (`0` = `2097152`); or `--c-chip-sizes` for mixed pairs |
 
-**Choosing the right size:** For a known title, open MAME’s **`neogeo.xml`** (or the FBNeo ROM database) and check each `c1`, `c2`, … entry. The `size="…"` attribute is the per-chip size in bytes (e.g. `size="4194304"` → `--c-chip-size 4194304`). If extract fails with “not a multiple of chip_size×2”, try another size from that list.
+**Choosing the right size:** For a known title, open MAME’s **`neogeo.xml`** (or the FBNeo ROM database) and check each `c1`, `c2`, … entry. The `size="…"` attribute is the per-chip size in bytes (e.g. `size="4194304"` → `--c-chip-size 4194304`). If extract fails with “not a multiple of chip_size×2”, try another size from that list — or use `--c-chip-sizes` when chip pairs have **different** sizes.
+
+**Mixed C pair sizes:** Some parents (e.g. `trally`) interleave a 1 MiB pair then a 512 KiB pair (C blob 3 MiB). A single `--c-chip-size 524288` divides evenly but yields **wrong** chip boundaries. Use the list form instead:
+
+```bash
+neoconv extract trally.neo --c-chip-sizes 1048576,1048576,524288,524288 --out-dir ./out
+```
+
+The GUI Extract tab still offers only one C size; use the CLI for mixed sets.
 
 #### V-ROM chunking
 
@@ -474,11 +490,11 @@ V-ROM data is contiguous in `.neo` and split to `v1`, `v2`, … on extract. When
 
 | | When unset | GUI presets | CLI |
 |---|------------|-------------|-----|
-| **V bank** (`v1`, `v2`, …) | 2 MB (`2097152`) | 512 KB – 16 MB | any positive byte value; `0` = `2097152` |
+| **V bank** (`v1`, `v2`, …) | 2 MB (`2097152`) | 512 KB – 16 MB | `--v-bank-size` any positive byte value (`0` = `2097152`); or `--v-bank-sizes` for mixed V files |
 
 **Choosing the right size:** In MAME **`neogeo.xml`**, check each `v1`, `v2`, … entry — the file `size` is the bank size for `--v-bank-size` (often 2 MB / `2097152`; some sets use 4 MB / `4194304`). Match what the MAME ZIP contains so filenames and lengths align after extract.
 
-If total V size is not a multiple of the bank size, the last file is shorter and a warning is emitted.
+If total V size is not a multiple of a **uniform** bank size, the last file is shorter and a warning is emitted. For **mixed** V sizes (e.g. 1 MiB + 512 KiB), use `--v-bank-sizes` so the sum matches `len(V)` exactly (no silent wrong split).
 
 ---
 
