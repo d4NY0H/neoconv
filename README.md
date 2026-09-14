@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="neoconv/assets/neoconv.png" alt="neoconv" width="128" height="128" />
+</p>
+
 # neoconv
 
 > A preservation-focused **CLI and GUI** tool to **convert** between **TerraOnion `.neo` containers** and **MAME / Darksoft Neo Geo ROM sets**, and to **edit `.neo` header metadata** (name, manufacturer, year, genre, NGH, screenshot index) **without repacking** ROM data.
