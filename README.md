@@ -145,6 +145,8 @@ neoconv-gui
 python3 -m neoconv.gui
 ```
 
+The window uses the bundled app icon where the platform/Tk allow it.
+
 Each **file path** row supports **drag & drop** onto its text entry field (next to "Browse…"): drop a `.neo`, a MAME ZIP, or a folder where the UI expects a directory. Drag & drop requires `tkinterdnd2` — install it once if needed:
 
 ```bash
