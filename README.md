@@ -164,7 +164,7 @@ Tabs:
 | Tab | Description |
 |-----|-------------|
 | **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap via radio (`auto` / `yes` / `no`). Status line checks mandatory P/S/M roles and warns on **V/C filename gaps** before pack |
-| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory; **C Chip Size** / **V Bank Size** dropdowns (presets 512 KB–20 MB / 16 MB). Arbitrary / mixed sizes: CLI (`--c-chip-size(s)`, `--v-bank-size(s)`) |
+| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory; **C Chip Size** / **V Bank Size** dropdowns (presets 512 KB–20 MB / 16 MB). Optional comma-separated **C chip sizes** / **V bank sizes** for mixed sets (same grammar as CLI) |
 | **Edit** | Load header fields from a `.neo`, adjust metadata (name/manufacturer truncated to header limits), write back (optional separate output path) |
 | **Info** | Inspect metadata, ROM region sizes, and **MD5 per region** (P, S, M, V, C) |
 
@@ -202,7 +202,7 @@ neoconv extract input.neo --prefix game --c-chip-size 4194304 --out game_customc
 # Explicit V bank size (example: 4 MB v1/v2 chunks)
 neoconv extract input.neo --prefix game --v-bank-size 4194304 --out game_v4m.zip
 
-# Mixed C / V sizes (e.g. Thrash Rally / trally) — CLI only; GUI has a single size
+# Mixed C / V sizes (e.g. Thrash Rally / trally) — same lists in GUI Extract
 neoconv extract trally.neo --prefix 038 \
   --c-chip-sizes 1048576,1048576,524288,524288 \
   --v-bank-sizes 1048576,524288 \
@@ -216,9 +216,9 @@ neoconv extract trally.neo --prefix 038 \
 | `--out`, `-o` | *(auto)* | Output ZIP path (ignored if `--out-dir` is set) |
 | `--out-dir`, `-d` | — | Extract to directory instead of ZIP; **wins over `--out`** when both are given |
 | `--c-chip-size` | `0` (= `2097152`) | Uniform size of **each C chip** in **bytes**. `0` = 2 MB. GUI presets match [common sizes](#common-extract-sizes-cli-bytes). See [C-ROM interleaving](#c-rom-interleaving) |
-| `--c-chip-sizes` | — | Comma-separated per-chip sizes (`c1,c2,c3,c4,…`) for **mixed** C pairs. Cannot combine with `--c-chip-size`. **CLI only** (GUI still uses a single size). |
+| `--c-chip-sizes` | — | Comma-separated per-chip sizes (`c1,c2,c3,c4,…`) for **mixed** C pairs. Cannot combine with `--c-chip-size`. GUI: optional free-text under the C dropdown |
 | `--v-bank-size` | `0` (= `2097152`) | Uniform size of **each V file** (`v1`, `v2`, …) in **bytes**. `0` = 2 MB. See [V-ROM chunking](#v-rom-chunking) |
-| `--v-bank-sizes` | — | Comma-separated per-file V sizes (`v1,v2,…`) for **mixed** V ROMs. Cannot combine with `--v-bank-size`. **CLI only**. |
+| `--v-bank-sizes` | — | Comma-separated per-file V sizes (`v1,v2,…`) for **mixed** V ROMs. Cannot combine with `--v-bank-size`. GUI: optional free-text under the V dropdown |
 
 **Overwrite behaviour:** Existing output files are replaced without prompting. A **warning** is printed (CLI: stderr; GUI: log) for each path that already exists. Directory extract updates files in place; ZIP output is replaced atomically (see [Atomic file writes](#atomic-file-writes)).
 
@@ -482,7 +482,7 @@ On **extract**, if unset, **neoconv** assumes **2 MB** per chip (`2097152` bytes
 neoconv extract trally.neo --c-chip-sizes 1048576,1048576,524288,524288 --out-dir ./out
 ```
 
-The GUI Extract tab still offers only one C size; use the CLI for mixed sets.
+In the GUI Extract tab, leave the dropdowns as-is and fill **C chip sizes** / **V bank sizes** with the same comma-separated byte lists.
 
 #### V-ROM chunking
 

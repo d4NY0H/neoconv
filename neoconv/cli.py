@@ -52,6 +52,7 @@ from .core import (
     parse_mame_dir,
     parse_mame_zip,
     parse_neo,
+    parse_size_list,
     replace_neo_metadata,
     resolve_genre,
     warn_overwriting_path,
@@ -93,22 +94,11 @@ def _print_cli_warnings(caught: list[warnings.WarningMessage]) -> None:
 
 
 def _parse_size_list(value: str) -> list[int]:
-    """Parse a comma-separated list of positive byte sizes for argparse."""
-    parts = [p.strip() for p in value.split(",") if p.strip()]
-    if not parts:
-        raise argparse.ArgumentTypeError("size list must not be empty")
-    sizes: list[int] = []
-    for part in parts:
-        try:
-            n = int(part, 0)
-        except ValueError as exc:
-            raise argparse.ArgumentTypeError(
-                f"invalid size '{part}' (expected integer bytes)"
-            ) from exc
-        if n <= 0:
-            raise argparse.ArgumentTypeError(f"size must be positive (got {n})")
-        sizes.append(n)
-    return sizes
+    """argparse ``type=`` adapter for comma-separated byte size lists."""
+    try:
+        return parse_size_list(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _print_neo_info(neo_data: bytes) -> RomSet:

@@ -14,6 +14,28 @@ from .models import RomSet
 from .neo_format import parse_neo
 
 
+def parse_size_list(value: str) -> list[int]:
+    """
+    Parse a comma-separated list of positive byte sizes.
+
+    Accepts decimal or ``0x``-prefixed hex (via ``int(part, 0)``).
+    Raises :class:`ValueError` when empty or any part is invalid / non-positive.
+    """
+    parts = [p.strip() for p in value.split(",") if p.strip()]
+    if not parts:
+        raise ValueError("size list must not be empty")
+    sizes: list[int] = []
+    for part in parts:
+        try:
+            n = int(part, 0)
+        except ValueError as exc:
+            raise ValueError(f"invalid size '{part}' (expected integer bytes)") from exc
+        if n <= 0:
+            raise ValueError(f"size must be positive (got {n})")
+        sizes.append(n)
+    return sizes
+
+
 def warn_overwriting_path(path: Path, *, stacklevel: int = 3) -> None:
     """Emit :class:`UserWarning` when *path* already exists (extract overwrite)."""
     if path.exists():

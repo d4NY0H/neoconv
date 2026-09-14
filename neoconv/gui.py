@@ -48,6 +48,7 @@ from .core import (
     iter_mame_dir_rom_files,
     extract_romset,
     extract_romset_to_zip,
+    parse_size_list,
     warn_overwriting_path,
     mame_dir_to_neo,
     mame_zip_to_neo,
@@ -197,6 +198,40 @@ def _v_bank_size_from_str(s: str) -> int:
         if s == label:
             return val
     return V_BANK_SIZE
+
+
+def _optional_size_list(raw: str) -> list[int] | None:
+    """Return ``None`` for blank input; otherwise parse via :func:`parse_size_list`."""
+    text = raw.strip()
+    if not text:
+        return None
+    return parse_size_list(text)
+
+
+def _extract_size_kwargs(
+    c_combo_label: str,
+    v_combo_label: str,
+    c_list_raw: str,
+    v_list_raw: str,
+) -> dict:
+    """
+    Build extract kwargs: list sizes when free-text is set, else combo scalars.
+
+    Raises :class:`ValueError` for invalid list grammar (do not fall back to
+    the combobox when the list field is non-empty but invalid).
+    """
+    c_chip_sizes = _optional_size_list(c_list_raw)
+    v_bank_sizes = _optional_size_list(v_list_raw)
+    kwargs: dict = {}
+    if c_chip_sizes is not None:
+        kwargs["c_chip_sizes"] = c_chip_sizes
+    else:
+        kwargs["c_chip_size"] = _c_chip_size_from_str(c_combo_label)
+    if v_bank_sizes is not None:
+        kwargs["v_bank_sizes"] = v_bank_sizes
+    else:
+        kwargs["v_bank_size"] = _v_bank_size_from_str(v_combo_label)
+    return kwargs
 
 
 def _set_controls_state(controls: list[tk.Widget], enabled: bool) -> None:
@@ -581,6 +616,14 @@ class ExtractTab(ttk.Frame):
         )
         self._c_size.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
+        self._c_sizes_var = tk.StringVar()
+        ttk.Label(opt_frame, text="C chip sizes:", width=lw, anchor="w").grid(
+            row=3, column=0, sticky="w", pady=(4, 0)
+        )
+        ttk.Entry(opt_frame, textvariable=self._c_sizes_var, width=42).grid(
+            row=3, column=1, sticky="we", padx=4, pady=(4, 0)
+        )
+
         self._v_size = _SizeCombo(
             opt_frame,
             "V Bank Size:",
@@ -588,7 +631,25 @@ class ExtractTab(ttk.Frame):
             "2 MB (default)",
             label_width=lw,
         )
-        self._v_size.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self._v_size.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+        self._v_sizes_var = tk.StringVar()
+        ttk.Label(opt_frame, text="V bank sizes:", width=lw, anchor="w").grid(
+            row=5, column=0, sticky="w", pady=(4, 0)
+        )
+        ttk.Entry(opt_frame, textvariable=self._v_sizes_var, width=42).grid(
+            row=5, column=1, sticky="we", padx=4, pady=(4, 0)
+        )
+
+        ttk.Label(
+            opt_frame,
+            text=(
+                "Leave size lists empty unless chips/banks have different sizes "
+                "(comma-separated bytes, same as --c-chip-sizes / --v-bank-sizes)."
+            ),
+            wraplength=520,
+            justify="left",
+        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 0))
         row += 1
 
         ctrl_row = ttk.Frame(self)
@@ -621,6 +682,17 @@ class ExtractTab(ttk.Frame):
         if not neo_path.exists():
             messagebox.showerror("Error", f"File not found: {neo_path}"); return
 
+        try:
+            size_kwargs = _extract_size_kwargs(
+                self._c_size.value_str,
+                self._v_size.value_str,
+                self._c_sizes_var.get(),
+                self._v_sizes_var.get(),
+            )
+        except ValueError as exc:
+            messagebox.showerror("Error", f"Invalid size list: {exc}")
+            return
+
         mode   = self._out_mode.get()
         prefix = self._prefix.get().strip() or neo_path.stem
         fmt    = self._fmt.get()
@@ -638,13 +710,27 @@ class ExtractTab(ttk.Frame):
             try:
                 if self._cancel_event.is_set():
                     raise UserCancelledError("Operation cancelled by user.")
-                neo_data    = neo_path.read_bytes()
-                romset      = parse_neo(neo_data)
-                c_chip_size = _c_chip_size_from_str(self._c_size.value_str)
-                v_bank_size = _v_bank_size_from_str(self._v_size.value_str)
+                neo_data = neo_path.read_bytes()
+                romset = parse_neo(neo_data)
                 self._wbridge.post_log(f"Reading: {neo_path}")
-                self._wbridge.post_log(f"C chip size: {c_chip_size:,} bytes")
-                self._wbridge.post_log(f"V bank size: {v_bank_size:,} bytes")
+                if "c_chip_sizes" in size_kwargs:
+                    sizes = size_kwargs["c_chip_sizes"]
+                    self._wbridge.post_log(
+                        f"C chip sizes: {', '.join(f'{s:,}' for s in sizes)} bytes"
+                    )
+                else:
+                    self._wbridge.post_log(
+                        f"C chip size: {size_kwargs['c_chip_size']:,} bytes"
+                    )
+                if "v_bank_sizes" in size_kwargs:
+                    sizes = size_kwargs["v_bank_sizes"]
+                    self._wbridge.post_log(
+                        f"V bank sizes: {', '.join(f'{s:,}' for s in sizes)} bytes"
+                    )
+                else:
+                    self._wbridge.post_log(
+                        f"V bank size: {size_kwargs['v_bank_size']:,} bytes"
+                    )
                 if self._cancel_event.is_set():
                     raise UserCancelledError("Operation cancelled by user.")
 
@@ -663,9 +749,8 @@ class ExtractTab(ttk.Frame):
                             out_dir,
                             name_prefix=prefix,
                             fmt=fmt,
-                            c_chip_size=c_chip_size,
-                            v_bank_size=v_bank_size,
                             cancel_check=_extract_cancel_check,
+                            **size_kwargs,
                         )
                     else:
                         dest = Path(self._out_zip.value) if self._out_zip.value \
@@ -675,9 +760,8 @@ class ExtractTab(ttk.Frame):
                             romset,
                             name_prefix=prefix,
                             fmt=fmt,
-                            c_chip_size=c_chip_size,
-                            v_bank_size=v_bank_size,
                             cancel_check=_extract_cancel_check,
+                            **size_kwargs,
                         )
                         if self._cancel_event.is_set():
                             raise UserCancelledError("Operation cancelled by user.")

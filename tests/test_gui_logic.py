@@ -98,6 +98,64 @@ def test_v_bank_size_from_str_unknown_falls_back_to_default():
     assert gui._v_bank_size_from_str("__no_such_label__") == V_BANK_SIZE
 
 
+def test_optional_size_list_blank_is_none():
+    assert gui._optional_size_list("") is None
+    assert gui._optional_size_list("  \t  ") is None
+
+
+def test_optional_size_list_parses_comma_and_hex():
+    assert gui._optional_size_list("1048576, 524288") == [1048576, 524288]
+    assert gui._optional_size_list("0x100000,0x80000") == [1048576, 524288]
+
+
+def test_optional_size_list_rejects_invalid():
+    with pytest.raises(ValueError):
+        gui._optional_size_list("nope")
+    with pytest.raises(ValueError):
+        gui._optional_size_list("0")
+    with pytest.raises(ValueError):
+        gui._optional_size_list("  ,  ")
+
+
+def test_extract_size_kwargs_uses_combos_when_lists_empty():
+    from neoconv.core import C_CHIP_SIZE_DEFAULT, V_BANK_SIZE
+
+    c_label = gui._C_CHIP_SIZES[0][0]
+    v_label = gui._V_CHUNK_SIZES[0][0]
+    kwargs = gui._extract_size_kwargs(c_label, v_label, "", "")
+    assert kwargs == {
+        "c_chip_size": C_CHIP_SIZE_DEFAULT,
+        "v_bank_size": V_BANK_SIZE,
+    }
+
+
+def test_extract_size_kwargs_list_overrides_combo():
+    four_mb = 4 * 1024 * 1024
+    c_label = next(l for l, v in gui._C_CHIP_SIZES if v == four_mb)
+    v_label = next(l for l, v in gui._V_CHUNK_SIZES if v == four_mb)
+    kwargs = gui._extract_size_kwargs(
+        c_label,
+        v_label,
+        "1048576,1048576,524288,524288",
+        "1048576,524288",
+    )
+    assert kwargs == {
+        "c_chip_sizes": [1048576, 1048576, 524288, 524288],
+        "v_bank_sizes": [1048576, 524288],
+    }
+    assert "c_chip_size" not in kwargs
+    assert "v_bank_size" not in kwargs
+
+
+def test_extract_size_kwargs_invalid_list_does_not_fallback():
+    c_label = gui._C_CHIP_SIZES[0][0]
+    v_label = gui._V_CHUNK_SIZES[0][0]
+    with pytest.raises(ValueError):
+        gui._extract_size_kwargs(c_label, v_label, "bad", "")
+    with pytest.raises(ValueError):
+        gui._extract_size_kwargs(c_label, v_label, "", "0")
+
+
 def test_set_controls_state_toggles_widget():
     class _Stub:
         def __init__(self) -> None:
