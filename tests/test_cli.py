@@ -242,6 +242,8 @@ def test_cmd_extract_passes_size_lists(monkeypatch, tmp_path, capsys):
     )
     assert captured["c_chip_sizes"] == [1048576, 1048576, 524288, 524288]
     assert captured["v_bank_sizes"] == [1048576, 524288]
+    assert "c_chip_size" not in captured
+    assert "v_bank_size" not in captured
     out = capsys.readouterr().out
     assert "C chip sizes:" in out
     assert "V bank sizes:" in out

@@ -150,9 +150,18 @@ def cmd_extract(args: argparse.Namespace) -> None:
 
     c_chip_sizes = args.c_chip_sizes
     v_bank_sizes = args.v_bank_sizes
-    # c_chip_size / v_bank_size: 0 means default 2 MB (MAME standard); ignored when lists set.
-    c_chip_size = args.c_chip_size if args.c_chip_size > 0 else C_CHIP_SIZE_DEFAULT
-    v_bank_size = args.v_bank_size if args.v_bank_size > 0 else V_BANK_SIZE
+    # Resolve uniform sizes only when the corresponding list is unused
+    # (0 on the scalar flag means default 2 MB).
+    c_chip_size = (
+        None
+        if c_chip_sizes is not None
+        else (args.c_chip_size if args.c_chip_size > 0 else C_CHIP_SIZE_DEFAULT)
+    )
+    v_bank_size = (
+        None
+        if v_bank_sizes is not None
+        else (args.v_bank_size if args.v_bank_size > 0 else V_BANK_SIZE)
+    )
     if c_chip_sizes is not None:
         print(f"C chip sizes: {', '.join(f'{s:,}' for s in c_chip_sizes)} bytes")
     else:
@@ -162,6 +171,17 @@ def cmd_extract(args: argparse.Namespace) -> None:
     else:
         print(f"V bank size: {v_bank_size:,} bytes")
 
+    extract_kwargs: dict = {
+        "name_prefix": prefix,
+        "fmt": fmt,
+        "c_chip_sizes": c_chip_sizes,
+        "v_bank_sizes": v_bank_sizes,
+    }
+    if c_chip_size is not None:
+        extract_kwargs["c_chip_size"] = c_chip_size
+    if v_bank_size is not None:
+        extract_kwargs["v_bank_size"] = v_bank_size
+
     written: dict | None = None
     out_path: Path | None = None
     zip_data = b""
@@ -169,30 +189,13 @@ def cmd_extract(args: argparse.Namespace) -> None:
         warnings.simplefilter("always")
         if args.out_dir:
             out_dir = Path(args.out_dir)
-            written = extract_neo(
-                neo_data,
-                out_dir,
-                name_prefix=prefix,
-                fmt=fmt,
-                c_chip_size=c_chip_size,
-                v_bank_size=v_bank_size,
-                c_chip_sizes=c_chip_sizes,
-                v_bank_sizes=v_bank_sizes,
-            )
+            written = extract_neo(neo_data, out_dir, **extract_kwargs)
         else:
             out_path = Path(args.out) if args.out else neo_path.with_suffix(
                 f".{'mame' if fmt == 'mame' else 'darksoft'}.zip"
             )
             warn_overwriting_path(out_path)
-            zip_data = extract_neo_to_zip(
-                neo_data,
-                name_prefix=prefix,
-                fmt=fmt,
-                c_chip_size=c_chip_size,
-                v_bank_size=v_bank_size,
-                c_chip_sizes=c_chip_sizes,
-                v_bank_sizes=v_bank_sizes,
-            )
+            zip_data = extract_neo_to_zip(neo_data, **extract_kwargs)
             write_bytes_atomic(out_path, zip_data)
     _print_cli_warnings(caught)
 

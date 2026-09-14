@@ -240,6 +240,16 @@ class TestCRomInterleaving:
         with pytest.raises(InvalidConfigurationError, match="size mismatch in list"):
             rs.c_chips(chip_sizes=[1024 * 1024, 512 * 1024])
 
+    def test_c_chip_sizes_not_multiple_of_512k_raises(self):
+        rs = RomSet(c=make_rom(1024 * 1024, 0xFF))
+        with pytest.raises(InvalidConfigurationError, match="not a multiple of 512 KB"):
+            rs.c_chips(chip_sizes=[400_000, 400_000])
+
+    def test_uniform_c_chip_size_not_multiple_of_512k_raises(self):
+        rs = RomSet(c=make_rom(800_000, 0xFF))
+        with pytest.raises(InvalidConfigurationError, match="not a multiple of 512 KB"):
+            rs.c_chips(chip_size=400_000)
+
     def test_mixed_v_bank_sizes_roundtrip(self):
         one_m = 1024 * 1024
         half_m = 512 * 1024

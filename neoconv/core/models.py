@@ -181,6 +181,13 @@ class RomSet:
                         f"{sizes[i]} vs {sizes[i + 1]} bytes.",
                         hint="Paired chips must share the same size.",
                     )
+            for i, size in enumerate(sizes):
+                if size % (512 * 1024) != 0:
+                    raise InvalidConfigurationError(
+                        f"C chip c{i + 1} size ({size:,} bytes) is not a multiple of 512 KB. "
+                        "The size list may be wrong or the ROM data incorrectly split.",
+                        hint="MAME Neo Geo C chips are multiples of 512 KiB.",
+                    )
             # Two chips of size S → interleaved bank of 2*S; sum(chip sizes) == len(C).
             expected = sum(sizes)
             if expected != len(self.c):
@@ -200,6 +207,15 @@ class RomSet:
                 offset += bank_size
             return chips
 
+        if chip_size <= 0:
+            raise InvalidConfigurationError(
+                f"C chip size must be positive (got {chip_size})."
+            )
+        if chip_size % (512 * 1024) != 0:
+            raise InvalidConfigurationError(
+                f"C chip size ({chip_size:,} bytes) is not a multiple of 512 KB.",
+                hint="MAME Neo Geo C chips are multiples of 512 KiB.",
+            )
         bank_size = chip_size * 2
         if len(self.c) % bank_size != 0:
             raise InvalidConfigurationError(
