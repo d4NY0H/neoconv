@@ -381,16 +381,20 @@ The table below matches the primary rules in `name_to_role`: extension (e.g. `.p
 
 #### Synthetic S-ROM (no physical `s1`)
 
-Some MAME parents (e.g. PVC / encrypted boards) ship without a separate text-layer `s1`; the driver uses a zero-filled "fixed" region. If **P** and **M** are present, there is **no** `s1`, but filenames look like a Neo Geo **C1** sprite set, `neoconv` may **inject** a zero-filled `S` region and emit a `UserWarning`. The fill size is chosen from filename heuristics aligned with `neogeo.xml`:
+Some MAME parents (e.g. PVC / encrypted boards such as `mslug5`, `samsho5`, `svc`, `kof2003`) ship **without** a separate text-layer `s1`; the emulator driver uses a zero-filled "fixed" region. If **P** and **M** are present, there is **no** `s1`, but filenames look like a Neo Geo **C1** sprite set, `neoconv` may **inject** a zero-filled `S` region and emit a `UserWarning`.
+
+That fill matches MAME softlist **size** heuristics so pack can complete — it is **not** a hardware-correct `.neo`. On TerraOnion / MiSTer (and similar cores) the text/fix layer will be **missing or corrupt**. Bootlegs that **do** include an `s1` (e.g. `ms5plus`) pack normally. There is currently **no** path to derive real s1 tiles from C-ROM data.
 
 | Pattern | Synthetic S size |
 |---------|------------------|
 | Basenames starting with `kf10-` (KOF2002 bootleg) | 256 KiB |
 | ``-c1r.`` / ``-c2r.`` sprite chip names (e.g. `269-c1r.c1`) | 512 KiB |
 | Certain **three-digit MAME set IDs** in `NNN-p1.` / `NNN-m1.` / `NNN-c1….c1` (see `_SYNTH_S_MAME_512K_SET_IDS` in `neoconv/core/constants.py`) | 512 KiB |
-| Default | 128 KiB |
+| Default (e.g. `mslug5` / set id 268 — do **not** force 512 KiB) | 128 KiB |
 
 If synthetic S is injected but **no** C sprite data was collected, pack **aborts** (avoids a silent empty-C `.neo`).
+
+To get a playable file for those parents today: start from a **known-good** `.neo` that already has real S data, or use a ROM set that includes a dedicated `s1`.
 
 #### FBNeo compatibility
 
@@ -532,7 +536,7 @@ For hacks and CD conversions, MAME `verifyroms` may report CRC mismatches becaus
 - **`verify` CLI subcommand:** `verify_roundtrip` exists in `neoconv.core` as a testing utility. Exposing it as a CLI command would only confirm that neoconv round-trips its own output correctly, which is covered by the test suite. It is not a user-facing feature.
 - **Directory traversal deeper than one level** in `pack`: the one-level limit (top-level files + one subdirectory) covers all known MAME unzip layouts. Recursive traversal would risk picking up unrelated files from nested archives or build artefacts.
 - **FBNeo as a separate input format:** FBNeo Neo Geo sets use the same naming conventions as MAME and are supported out of the box — see [FBNeo compatibility](#fbneo-compatibility).
-
+- **Deriving real s1 / text-layer tiles from C-ROM** for PVC parents (and CLI/`--s1` injection from a reference `.neo`): not supported yet — see [Synthetic S-ROM](#synthetic-s-rom-no-physical-s1).
 #### Legacy neoconv headers (Year/Genre as uint16)
 
 Older neoconv builds packed Year/Genre as **uint16** at `0x1C`/`0x1E` (NGH at `0x24`). Current neoconv matches TerraOnion / neosdconv (**four uint32**). On read, headers that still look like the old layout (non-zero packed genre beside year, NGH slot at `0x28` empty) are detected, parsed correctly, and emit a `UserWarning`. Rewriting with `edit` or `pack` migrates them to the modern layout. Files with **genre 0** under the old layout cannot be distinguished reliably and are read as modern.

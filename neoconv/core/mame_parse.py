@@ -193,7 +193,9 @@ def collect_pack_psm_roles_for_validation(filenames: Iterable[str]) -> set[str]:
 
     MAME lists several sets (e.g. parent ``svc``) where the text layer has no
     dedicated s1 ROM; the driver fills the fixed region with zeros. When such
-    a set is detected, ``S`` is treated as present for preflight only.
+    a set is detected, ``S`` is treated as present for preflight only (pack
+    will still inject zero-fill S and warn that the result is not
+    hardware-playable).
     """
     names = tuple(filenames)
     roles: set[str] = set()
@@ -256,7 +258,10 @@ def _inject_synthetic_s_rom_if_needed(
     roles["S"] = b"\x00" * size
     warnings.warn(
         f"No text-layer ROM (s1) in {source}; using {size // 1024} KiB zero fill "
-        "as MAME does for boards without a dedicated s1.",
+        "as a MAME softlist-shaped placeholder so pack can complete. "
+        "The resulting .neo is NOT playable on TerraOnion / MiSTer hardware "
+        "(missing or corrupt text/fix layer). Prefer a set that ships a real "
+        "s1 (e.g. bootlegs like ms5plus), or repair S from a known-good .neo.",
         UserWarning,
         stacklevel=3,
     )
@@ -276,7 +281,9 @@ def roles_to_romset(
 
     When ``source_filenames`` is provided (ZIP member paths or directory
     basenames), boards without a physical s1 ROM may receive a zero-filled
-    synthetic S region matching MAME's ``fixed`` area behaviour.
+    synthetic S region matching MAME's ``fixed`` area *size* so pack can
+    finish. That placeholder is **not** hardware-correct on TerraOnion /
+    MiSTer (see the ``UserWarning`` emitted on injection).
     """
     roles = dict(roles)
     injected_s = _inject_synthetic_s_rom_if_needed(roles, source, source_filenames)

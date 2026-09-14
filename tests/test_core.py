@@ -505,10 +505,11 @@ class TestCoreEdgeCases:
             zf.writestr("269-v1.v1", make_rom(1024, 4))
             zf.writestr("269-c1r.c1", chip)
             zf.writestr("269-c2r.c2", make_rom(C_BANK_SIZE, 0x22))
-        with pytest.warns(UserWarning, match="No text-layer ROM"):
+        with pytest.warns(UserWarning, match="No text-layer ROM") as caught:
             rs = parse_mame_zip(z)
         assert len(rs.s) == 0x80000
         assert rs.s == b"\x00" * 0x80000
+        assert any("NOT playable" in str(w.message) for w in caught)
 
     def test_parse_mame_zip_garou_style_512k_zero_s_without_c1r(self, tmp_path):
         """Garou parent uses 512 KiB fixed fill; C ROMs are ``253-c1.c1`` (no ``r``)."""
