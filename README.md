@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="neoconv/assets/neoconv.png" alt="neoconv" width="128" height="128" />
+  <img src="neoconv/assets/neoconv.png" alt="neoconv" width="256" height="256" />
 </p>
 
 # neoconv
