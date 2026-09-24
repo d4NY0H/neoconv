@@ -295,6 +295,68 @@ class TestCRomInterleaving:
         with pytest.raises(InvalidConfigurationError, match="not a multiple"):
             rs.p_chips(chip_size=400_000)
 
+    def test_p_chips_negative_size_raises(self):
+        rs = RomSet(p=make_rom(1024, 0xFF))
+        with pytest.raises(InvalidConfigurationError, match="must be positive"):
+            rs.p_chips(chip_size=-1)
+
+    def test_p_chips_empty_p_with_uniform_size_keeps_single_empty(self):
+        rs = RomSet(p=b"")
+        assert rs.p_chips(chip_size=524288) == [b""]
+
+    def test_extract_romset_default_writes_single_p1(self, tmp_path):
+        p = make_rom(4096, 0xB1)
+        rs = RomSet(
+            p=p,
+            s=make_rom(128, 2),
+            m=make_rom(128, 3),
+            v=make_rom(256, 4),
+            c=interleave_c_chips([make_rom(C_BANK_SIZE, 5), make_rom(C_BANK_SIZE, 6)]),
+        )
+        written = extract_romset(
+            rs, tmp_path / "out", name_prefix="g", fmt="mame", v_bank_size=256
+        )
+        assert set(k for k in written if k.startswith("p")) == {"p1"}
+        assert written["p1"].read_bytes() == p
+
+    def test_extract_romset_empty_p_with_uniform_size_still_writes_p1(self, tmp_path):
+        rs = RomSet(
+            p=b"",
+            s=make_rom(128, 2),
+            m=make_rom(128, 3),
+            v=b"",
+            c=interleave_c_chips([make_rom(C_BANK_SIZE, 5), make_rom(C_BANK_SIZE, 6)]),
+        )
+        written = extract_romset(
+            rs, tmp_path / "out", name_prefix="g", fmt="mame", p_chip_size=524288
+        )
+        assert written["p1"].read_bytes() == b""
+        assert "p2" not in written
+
+    def test_extract_romset_to_zip_honours_p_chip_sizes(self):
+        half_m = 512 * 1024
+        p1 = make_rom(half_m, 0xB1)
+        p2 = make_rom(half_m, 0xB2)
+        rs = RomSet(
+            p=p1 + p2,
+            s=make_rom(128, 2),
+            m=make_rom(128, 3),
+            v=make_rom(256, 4),
+            c=interleave_c_chips([make_rom(C_BANK_SIZE, 5), make_rom(C_BANK_SIZE, 6)]),
+        )
+        zip_data = extract_romset_to_zip(
+            rs,
+            name_prefix="038",
+            fmt="mame",
+            p_chip_sizes=[half_m, half_m],
+            v_bank_size=256,
+        )
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+            assert zf.read("038-p1.bin") == p1
+            assert zf.read("038-p2.bin") == p2
+            names = zf.namelist()
+            assert "038-p3.bin" not in names
+
     def test_extract_romset_honours_mixed_size_lists(self, tmp_path):
         one_m = 1024 * 1024
         half_m = 512 * 1024

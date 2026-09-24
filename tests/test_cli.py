@@ -368,6 +368,29 @@ def test_cmd_extract_rejects_p_size_and_sizes_together(monkeypatch, tmp_path):
     assert exc.value.code == 1
 
 
+def test_cmd_extract_rejects_negative_p_chip_size(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli.sys, "exit", _exit_raiser)
+    neo = tmp_path / "game.neo"
+    neo.write_bytes(b"x")
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_extract(
+            argparse.Namespace(
+                neo_file=str(neo),
+                prefix="",
+                format="mame",
+                out="",
+                out_dir="",
+                c_chip_size=0,
+                v_bank_size=0,
+                c_chip_sizes=None,
+                v_bank_sizes=None,
+                p_chip_size=-1,
+                p_chip_sizes=None,
+            )
+        )
+    assert exc.value.code == 1
+
+
 def test_parse_size_list_accepts_hex():
     assert cli._parse_size_list("0x100000,0x80000") == [1048576, 524288]
 

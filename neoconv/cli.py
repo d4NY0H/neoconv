@@ -135,6 +135,12 @@ def cmd_extract(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+    if args.p_chip_size < 0:
+        print(
+            "Error: --p-chip-size must be positive (or 0 for entire P as p1).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     neo_data = neo_path.read_bytes()
     print(f"Reading: {neo_path}")

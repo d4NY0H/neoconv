@@ -136,10 +136,14 @@ class RomSet:
         if chip_size is None or chip_size == 0:
             return [self.p]
 
-        if chip_size <= 0:
+        if chip_size < 0:
             raise InvalidConfigurationError(
                 f"P chip size must be positive (got {chip_size})."
             )
+        # Empty P: keep a single empty p1 (same as the unset default), even when a
+        # uniform size was requested — 0 % size == 0 would otherwise yield no files.
+        if len(self.p) == 0:
+            return [self.p]
         if len(self.p) % chip_size != 0:
             raise InvalidConfigurationError(
                 f"P ROM size ({len(self.p):,} bytes) is not a multiple of "
