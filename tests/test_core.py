@@ -263,6 +263,38 @@ class TestCRomInterleaving:
         with pytest.raises(InvalidConfigurationError, match="does not match the sum"):
             rs.v_chunks(bank_sizes=[512 * 1024, 512 * 1024, 512 * 1024])
 
+    def test_p_chips_default_is_entire_region(self):
+        p = make_rom(1024 * 1024, 0xB1)
+        rs = RomSet(p=p)
+        assert rs.p_chips() == [p]
+        assert rs.p_chips(chip_size=0) == [p]
+        assert rs.p_chips(chip_size=None) == [p]
+
+    def test_p_chips_uniform_split(self):
+        half_m = 512 * 1024
+        p1 = make_rom(half_m, 0xB1)
+        p2 = make_rom(half_m, 0xB2)
+        rs = RomSet(p=p1 + p2)
+        assert rs.p_chips(chip_size=half_m) == [p1, p2]
+
+    def test_p_chips_mixed_sizes(self):
+        one_m = 1024 * 1024
+        half_m = 512 * 1024
+        p1 = make_rom(one_m, 0xB1)
+        p2 = make_rom(half_m, 0xB2)
+        rs = RomSet(p=p1 + p2)
+        assert rs.p_chips(chip_sizes=[one_m, half_m]) == [p1, p2]
+
+    def test_p_chips_sum_mismatch_raises(self):
+        rs = RomSet(p=make_rom(1024 * 1024, 0xFF))
+        with pytest.raises(InvalidConfigurationError, match="does not match the sum"):
+            rs.p_chips(chip_sizes=[512 * 1024, 512 * 1024, 512 * 1024])
+
+    def test_p_chips_uniform_not_multiple_raises(self):
+        rs = RomSet(p=make_rom(1024 * 1024, 0xFF))
+        with pytest.raises(InvalidConfigurationError, match="not a multiple"):
+            rs.p_chips(chip_size=400_000)
+
     def test_extract_romset_honours_mixed_size_lists(self, tmp_path):
         one_m = 1024 * 1024
         half_m = 512 * 1024
@@ -272,8 +304,10 @@ class TestCRomInterleaving:
         c4 = make_rom(half_m, 0x44)
         v1 = make_rom(one_m, 0xA1)
         v2 = make_rom(half_m, 0xA2)
+        p1 = make_rom(half_m, 0xB1)
+        p2 = make_rom(half_m, 0xB2)
         rs = RomSet(
-            p=make_rom(4096, 1),
+            p=p1 + p2,
             s=make_rom(128 * 1024, 2),
             m=make_rom(128 * 1024, 3),
             v=v1 + v2,
@@ -287,7 +321,10 @@ class TestCRomInterleaving:
             fmt="mame",
             c_chip_sizes=[one_m, one_m, half_m, half_m],
             v_bank_sizes=[one_m, half_m],
+            p_chip_sizes=[half_m, half_m],
         )
+        assert written["p1"].read_bytes() == p1
+        assert written["p2"].read_bytes() == p2
         assert written["c1"].read_bytes() == c1
         assert written["c2"].read_bytes() == c2
         assert written["c3"].read_bytes() == c3

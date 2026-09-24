@@ -129,6 +129,12 @@ def cmd_extract(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+    if args.p_chip_sizes is not None and args.p_chip_size != 0:
+        print(
+            "Error: use either --p-chip-size or --p-chip-sizes, not both.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     neo_data = neo_path.read_bytes()
     print(f"Reading: {neo_path}")
@@ -140,8 +146,9 @@ def cmd_extract(args: argparse.Namespace) -> None:
 
     c_chip_sizes = args.c_chip_sizes
     v_bank_sizes = args.v_bank_sizes
+    p_chip_sizes = args.p_chip_sizes
     # Resolve uniform sizes only when the corresponding list is unused
-    # (0 on the scalar flag means default 2 MB).
+    # (0 on the scalar flag means default for C/V; for P, 0 = entire as p1).
     c_chip_size = (
         None
         if c_chip_sizes is not None
@@ -152,6 +159,17 @@ def cmd_extract(args: argparse.Namespace) -> None:
         if v_bank_sizes is not None
         else (args.v_bank_size if args.v_bank_size > 0 else V_BANK_SIZE)
     )
+    p_chip_size = (
+        None
+        if p_chip_sizes is not None
+        else (args.p_chip_size if args.p_chip_size > 0 else None)
+    )
+    if p_chip_sizes is not None:
+        print(f"P chip sizes: {', '.join(f'{s:,}' for s in p_chip_sizes)} bytes")
+    elif p_chip_size is not None:
+        print(f"P chip size: {p_chip_size:,} bytes")
+    else:
+        print("P chip size: entire region as p1")
     if c_chip_sizes is not None:
         print(f"C chip sizes: {', '.join(f'{s:,}' for s in c_chip_sizes)} bytes")
     else:
@@ -166,11 +184,14 @@ def cmd_extract(args: argparse.Namespace) -> None:
         "fmt": fmt,
         "c_chip_sizes": c_chip_sizes,
         "v_bank_sizes": v_bank_sizes,
+        "p_chip_sizes": p_chip_sizes,
     }
     if c_chip_size is not None:
         extract_kwargs["c_chip_size"] = c_chip_size
     if v_bank_size is not None:
         extract_kwargs["v_bank_size"] = v_bank_size
+    if p_chip_size is not None:
+        extract_kwargs["p_chip_size"] = p_chip_size
 
     written: dict | None = None
     out_path: Path | None = None
@@ -374,6 +395,28 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Comma-separated per-file V sizes in order (v1,v2,…). "
             "Required for sets with unequal V ROMs. Cannot be combined with --v-bank-size."
+        ),
+    )
+    p_extract.add_argument(
+        "--p-chip-size",
+        type=int,
+        default=0,
+        metavar="BYTES",
+        help=(
+            "Uniform size of each P chip in bytes when splitting to p1, p2, … "
+            "(default: 0 = entire P region as a single p1). "
+            "Use e.g. 524288 for two equal 512 KiB program parts (trally). "
+            "For unequal P sizes use --p-chip-sizes instead."
+        ),
+    )
+    p_extract.add_argument(
+        "--p-chip-sizes",
+        type=_parse_size_list,
+        default=None,
+        metavar="BYTES,BYTES,...",
+        help=(
+            "Comma-separated per-file P sizes in order (p1,p2,…). "
+            "Sum must equal the P region size. Cannot be combined with --p-chip-size."
         ),
     )
     p_extract.set_defaults(func=cmd_extract)

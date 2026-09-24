@@ -91,6 +91,66 @@ class RomSet:
     c: bytes = b""  # all C data interleaved (as stored in .neo)
     meta: NeoMeta = field(default_factory=NeoMeta)
 
+    def p_chips(
+        self,
+        chip_size: Optional[int] = None,
+        *,
+        chip_sizes: Optional[Sequence[int]] = None,
+    ) -> list[bytes]:
+        """
+        Split P data into chips (``p1``, ``p2``, …).
+
+        Pack concatenates multi-chip P ROMs into one region; chip boundaries
+        are not stored in ``.neo``. Default (no size / list) returns the
+        entire region as a single ``p1``.
+
+        Parameters
+        ----------
+        chip_size : uniform size of each P chip in bytes. ``None`` or ``0``
+                    keeps the whole region as one chip. Ignored when
+                    *chip_sizes* is provided. Must divide ``len(P)`` exactly.
+        chip_sizes : explicit per-file sizes in order. Sum must equal ``len(P)``.
+        """
+        if chip_sizes is not None:
+            sizes = list(chip_sizes)
+            if not sizes:
+                raise InvalidConfigurationError("P chip size list must not be empty.")
+            if any(s <= 0 for s in sizes):
+                raise InvalidConfigurationError(
+                    f"P chip sizes must be positive (got {sizes})."
+                )
+            expected = sum(sizes)
+            if expected != len(self.p):
+                raise InvalidConfigurationError(
+                    f"P ROM size ({len(self.p):,} bytes) does not match the sum of "
+                    f"--p-chip-sizes ({expected:,} bytes).",
+                    hint="List every p1, p2, … size from MAME neogeo.xml in order.",
+                )
+            chips: list[bytes] = []
+            offset = 0
+            for size in sizes:
+                chips.append(self.p[offset : offset + size])
+                offset += size
+            return chips
+
+        if chip_size is None or chip_size == 0:
+            return [self.p]
+
+        if chip_size <= 0:
+            raise InvalidConfigurationError(
+                f"P chip size must be positive (got {chip_size})."
+            )
+        if len(self.p) % chip_size != 0:
+            raise InvalidConfigurationError(
+                f"P ROM size ({len(self.p):,} bytes) is not a multiple of "
+                f"p_chip_size ({chip_size:,} bytes). "
+                f"Try a different --p-chip-size, or --p-chip-sizes for mixed sets.",
+                hint="Check per-chip sizes in MAME neogeo.xml (see --p-chip-size).",
+            )
+        return [
+            self.p[i : i + chip_size] for i in range(0, len(self.p), chip_size)
+        ]
+
     def v_chunks(
         self,
         bank_size: int = V_BANK_SIZE,

@@ -71,8 +71,10 @@ def extract_romset(
     c_chip_size: int = C_CHIP_SIZE_DEFAULT,
     v_bank_size: int = V_BANK_SIZE,
     *,
+    p_chip_size: Optional[int] = None,
     c_chip_sizes: Optional[Sequence[int]] = None,
     v_bank_sizes: Optional[Sequence[int]] = None,
+    p_chip_sizes: Optional[Sequence[int]] = None,
     cancel_check: Optional[Callable[[], None]] = None,
 ) -> dict[str, Path]:
     """
@@ -88,8 +90,11 @@ def extract_romset(
                    Ignored when *c_chip_sizes* is set.
     v_bank_size  : uniform size of each V chunk in bytes (default 2 MB).
                    Ignored when *v_bank_sizes* is set.
+    p_chip_size  : uniform size of each P chip in bytes. ``None`` / unset keeps
+                   the whole P region as ``p1``. Ignored when *p_chip_sizes* is set.
     c_chip_sizes : explicit per-chip sizes (c1, c2, …) for mixed C sets.
     v_bank_sizes : explicit per-file sizes (v1, v2, …) for mixed V sets.
+    p_chip_sizes : explicit per-file sizes (p1, p2, …) for multi-chip P sets.
     cancel_check : optional callback invoked between ROM writes; raise
                    :class:`~neoconv.core.UserCancelledError` to abort.
 
@@ -110,7 +115,10 @@ def extract_romset(
         written[role + suffix] = p
         return p
 
-    _write_rom("p1", romset.p)
+    for i, chip in enumerate(
+        romset.p_chips(chip_size=p_chip_size, chip_sizes=p_chip_sizes), start=1
+    ):
+        _write_rom("p", chip, suffix=str(i))
     _write_rom("s1", romset.s)
     _write_rom("m1", romset.m)
 
@@ -136,8 +144,10 @@ def extract_neo(
     c_chip_size: int = C_CHIP_SIZE_DEFAULT,
     v_bank_size: int = V_BANK_SIZE,
     *,
+    p_chip_size: Optional[int] = None,
     c_chip_sizes: Optional[Sequence[int]] = None,
     v_bank_sizes: Optional[Sequence[int]] = None,
+    p_chip_sizes: Optional[Sequence[int]] = None,
     cancel_check: Optional[Callable[[], None]] = None,
 ) -> dict[str, Path]:
     """
@@ -151,8 +161,10 @@ def extract_neo(
     fmt          : 'mame' -> .bin extension, 'darksoft' -> .rom extension
     c_chip_size  : uniform C chip size (ignored when *c_chip_sizes* is set).
     v_bank_size  : uniform V bank size (ignored when *v_bank_sizes* is set).
+    p_chip_size  : uniform P chip size (ignored when *p_chip_sizes* is set).
     c_chip_sizes : explicit per-chip sizes for mixed C sets.
     v_bank_sizes : explicit per-file sizes for mixed V sets.
+    p_chip_sizes : explicit per-file sizes for multi-chip P sets.
     cancel_check : optional cancellation callback (see :func:`extract_romset`).
 
     Returns dict mapping role -> output Path.
@@ -165,8 +177,10 @@ def extract_neo(
         fmt=fmt,
         c_chip_size=c_chip_size,
         v_bank_size=v_bank_size,
+        p_chip_size=p_chip_size,
         c_chip_sizes=c_chip_sizes,
         v_bank_sizes=v_bank_sizes,
+        p_chip_sizes=p_chip_sizes,
         cancel_check=cancel_check,
     )
 
@@ -178,8 +192,10 @@ def extract_romset_to_zip(
     c_chip_size: int = C_CHIP_SIZE_DEFAULT,
     v_bank_size: int = V_BANK_SIZE,
     *,
+    p_chip_size: Optional[int] = None,
     c_chip_sizes: Optional[Sequence[int]] = None,
     v_bank_sizes: Optional[Sequence[int]] = None,
+    p_chip_sizes: Optional[Sequence[int]] = None,
     cancel_check: Optional[Callable[[], None]] = None,
 ) -> bytes:
     """
@@ -189,8 +205,10 @@ def extract_romset_to_zip(
     ----------
     c_chip_size : uniform C chip size (ignored when *c_chip_sizes* is set).
     v_bank_size : uniform V bank size (ignored when *v_bank_sizes* is set).
+    p_chip_size : uniform P chip size (ignored when *p_chip_sizes* is set).
     c_chip_sizes : explicit per-chip sizes for mixed C sets.
     v_bank_sizes : explicit per-file sizes for mixed V sets.
+    p_chip_sizes : explicit per-file sizes for multi-chip P sets.
     cancel_check : optional cancellation callback (see :func:`extract_romset`).
     """
     if v_bank_sizes is None:
@@ -199,8 +217,11 @@ def extract_romset_to_zip(
     buf = io.BytesIO()
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        _poll_cancel(cancel_check)
-        zf.writestr(f"{name_prefix}-p1{ext}", romset.p)
+        for i, chip in enumerate(
+            romset.p_chips(chip_size=p_chip_size, chip_sizes=p_chip_sizes), start=1
+        ):
+            _poll_cancel(cancel_check)
+            zf.writestr(f"{name_prefix}-p{i}{ext}", chip)
         _poll_cancel(cancel_check)
         zf.writestr(f"{name_prefix}-s1{ext}", romset.s)
         _poll_cancel(cancel_check)
@@ -227,8 +248,10 @@ def extract_neo_to_zip(
     c_chip_size: int = C_CHIP_SIZE_DEFAULT,
     v_bank_size: int = V_BANK_SIZE,
     *,
+    p_chip_size: Optional[int] = None,
     c_chip_sizes: Optional[Sequence[int]] = None,
     v_bank_sizes: Optional[Sequence[int]] = None,
+    p_chip_sizes: Optional[Sequence[int]] = None,
     cancel_check: Optional[Callable[[], None]] = None,
 ) -> bytes:
     """Like extract_neo but returns a ZIP archive as bytes.
@@ -237,8 +260,10 @@ def extract_neo_to_zip(
     ----------
     c_chip_size : uniform C chip size (ignored when *c_chip_sizes* is set).
     v_bank_size : uniform V bank size (ignored when *v_bank_sizes* is set).
+    p_chip_size : uniform P chip size (ignored when *p_chip_sizes* is set).
     c_chip_sizes : explicit per-chip sizes for mixed C sets.
     v_bank_sizes : explicit per-file sizes for mixed V sets.
+    p_chip_sizes : explicit per-file sizes for multi-chip P sets.
     cancel_check : optional cancellation callback (see :func:`extract_romset`).
     """
     romset = parse_neo(neo_data)
@@ -248,8 +273,10 @@ def extract_neo_to_zip(
         fmt=fmt,
         c_chip_size=c_chip_size,
         v_bank_size=v_bank_size,
+        p_chip_size=p_chip_size,
         c_chip_sizes=c_chip_sizes,
         v_bank_sizes=v_bank_sizes,
+        p_chip_sizes=p_chip_sizes,
         cancel_check=cancel_check,
     )
 

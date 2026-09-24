@@ -164,7 +164,7 @@ Tabs:
 | Tab | Description |
 |-----|-------------|
 | **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap via radio (`auto` / `yes` / `no`). Status line checks mandatory P/S/M roles and warns on **V/C filename gaps** before pack |
-| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory; **C Chip Size** / **V Bank Size** dropdowns (presets 512 KB–20 MB / 16 MB). Optional comma-separated **C chip sizes** / **V bank sizes** for mixed sets (same grammar as CLI) |
+| **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory; **P / C / V** size dropdowns plus optional comma-separated size lists for mixed/multi-chip sets (same grammar as CLI). P default keeps one `p1` |
 | **Edit** | Load header fields from a `.neo`, adjust metadata (name/manufacturer truncated to header limits), write back (optional separate output path) |
 | **Info** | Inspect metadata, ROM region sizes, and **MD5 per region** (P, S, M, V, C) |
 
@@ -202,8 +202,9 @@ neoconv extract input.neo --prefix game --c-chip-size 4194304 --out game_customc
 # Explicit V bank size (example: 4 MB v1/v2 chunks)
 neoconv extract input.neo --prefix game --v-bank-size 4194304 --out game_v4m.zip
 
-# Mixed C / V sizes (e.g. Thrash Rally / trally) — same lists in GUI Extract
+# Mixed C / V / P sizes (e.g. Thrash Rally / trally) — same lists in GUI Extract
 neoconv extract trally.neo --prefix 038 \
+  --p-chip-sizes 524288,524288 \
   --c-chip-sizes 1048576,1048576,524288,524288 \
   --v-bank-sizes 1048576,524288 \
   --out-dir ./trally_out/
@@ -215,6 +216,8 @@ neoconv extract trally.neo --prefix 038 \
 | `--format`, `-f` | `mame` | Output format: `mame` (`.bin`) or `darksoft` (`.rom`) |
 | `--out`, `-o` | *(auto)* | Output ZIP path (ignored if `--out-dir` is set) |
 | `--out-dir`, `-d` | — | Extract to directory instead of ZIP; **wins over `--out`** when both are given |
+| `--p-chip-size` | `0` (= entire as `p1`) | Uniform size of **each P chip** in **bytes**. `0` keeps one `p1`. GUI: **P Chip Size** dropdown |
+| `--p-chip-sizes` | — | Comma-separated per-file P sizes (`p1,p2,…`). Sum must equal the P region. Cannot combine with `--p-chip-size`. GUI: optional free-text under the P dropdown |
 | `--c-chip-size` | `0` (= `2097152`) | Uniform size of **each C chip** in **bytes**. `0` = 2 MB. GUI presets match [common sizes](#common-extract-sizes-cli-bytes). See [C-ROM interleaving](#c-rom-interleaving) |
 | `--c-chip-sizes` | — | Comma-separated per-chip sizes (`c1,c2,c3,c4,…`) for **mixed** C pairs. Cannot combine with `--c-chip-size`. GUI: optional free-text under the C dropdown |
 | `--v-bank-size` | `0` (= `2097152`) | Uniform size of **each V file** (`v1`, `v2`, …) in **bytes**. `0` = 2 MB. See [V-ROM chunking](#v-rom-chunking) |
@@ -352,7 +355,7 @@ Background on pack/extract behaviour, ROM naming, and the on-disk `.neo` layout.
 | Section | Topics |
 |---------|--------|
 | [Pack input](#pack-input-rom-file-naming) | MAME filenames, directory layout, synthetic S-ROM |
-| [Extract sizing](#extract-c-and-v-rom-sizing) | Byte presets, C interleaving, V chunking |
+| [Extract sizing](#extract-p-c-and-v-rom-sizing) | Byte presets, P split, C interleaving, V chunking |
 | [P-ROM swap](#p-rom-bank-swap---swap-p) | `--swap-p` / auto-detect |
 | [`.neo` format](#neo-container-format) | Header layout, V1/V2 fields |
 | [Notes](#notes) | CRC mismatches, out-of-scope items |
@@ -431,11 +434,11 @@ Standard BIOS files (`000-lo.lo`, `sfix.sfix`, etc.) are ignored. Unknown files 
 
 ---
 
-### Extract: C and V ROM sizing
+### Extract: P, C and V ROM sizing
 
 #### Why you need to specify chip sizes at all
 
-The `.neo` header stores only the **total byte count** for the C-ROM block and the V-ROM block — it does not record how many chips those blocks were split across, or how large each individual chip was. That information existed in the original MAME ROM set but is lost when the files are merged into the `.neo` container.
+The `.neo` header stores only the **total byte count** for the P-, C-, and V-ROM blocks — it does not record how many chips those blocks were split across, or how large each individual chip was. That information existed in the original MAME ROM set but is lost when the files are merged into the `.neo` container.
 
 When **neoconv** extracts, it must re-split those blocks into individual files. The split is purely mechanical — any size that divides the total evenly is accepted without error. The question is only whether the resulting files **match what MAME or Darksoft expect**.
 
@@ -483,6 +486,18 @@ neoconv extract trally.neo --c-chip-sizes 1048576,1048576,524288,524288 --out-di
 ```
 
 In the GUI Extract tab, leave the dropdowns as-is and fill **C chip sizes** / **V bank sizes** with the same comma-separated byte lists.
+
+#### P-ROM splitting
+
+Pack concatenates multi-chip program ROMs (`p1` + `p2` + …) into one P region. On extract the default is a **single** `p1` for the whole region (most titles).
+
+| | When unset | GUI presets | CLI |
+|---|------------|-------------|-----|
+| **P chip** (`p1`, `p2`, …) | Entire region as `p1` | Entire as p1; 512 KB – 8 MB | `--p-chip-size` positive bytes (`0` = entire as p1); or `--p-chip-sizes` for unequal parts |
+
+**Equal halves (e.g. `trally`):** `--p-chip-size 524288` (or GUI **512 KB**) yields `p1` + `p2` of 512 KiB each.
+
+**Unequal parts:** use `--p-chip-sizes` / GUI **P chip sizes**; the sum must equal `len(P)` or extract fails hard (no silent wrong split).
 
 #### V-ROM chunking
 

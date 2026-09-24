@@ -122,38 +122,58 @@ def test_extract_size_kwargs_uses_combos_when_lists_empty():
 
     c_label = gui._C_CHIP_SIZES[0][0]
     v_label = gui._V_CHUNK_SIZES[0][0]
-    kwargs = gui._extract_size_kwargs(c_label, v_label, "", "")
+    p_label = gui._P_CHIP_SIZES[0][0]
+    kwargs = gui._extract_size_kwargs(c_label, v_label, "", "", p_label, "")
     assert kwargs == {
         "c_chip_size": C_CHIP_SIZE_DEFAULT,
         "v_bank_size": V_BANK_SIZE,
     }
+    assert "p_chip_size" not in kwargs
+    assert "p_chip_sizes" not in kwargs
 
 
 def test_extract_size_kwargs_list_overrides_combo():
     four_mb = 4 * 1024 * 1024
     c_label = next(l for l, v in gui._C_CHIP_SIZES if v == four_mb)
     v_label = next(l for l, v in gui._V_CHUNK_SIZES if v == four_mb)
+    p_label = next(l for l, v in gui._P_CHIP_SIZES if v == 512 * 1024)
     kwargs = gui._extract_size_kwargs(
         c_label,
         v_label,
         "1048576,1048576,524288,524288",
         "1048576,524288",
+        p_label,
+        "524288,524288",
     )
     assert kwargs == {
+        "p_chip_sizes": [524288, 524288],
         "c_chip_sizes": [1048576, 1048576, 524288, 524288],
         "v_bank_sizes": [1048576, 524288],
     }
     assert "c_chip_size" not in kwargs
     assert "v_bank_size" not in kwargs
+    assert "p_chip_size" not in kwargs
+
+
+def test_extract_size_kwargs_uniform_p_from_combo():
+    half_m = 512 * 1024
+    c_label = gui._C_CHIP_SIZES[0][0]
+    v_label = gui._V_CHUNK_SIZES[0][0]
+    p_label = next(l for l, v in gui._P_CHIP_SIZES if v == half_m)
+    kwargs = gui._extract_size_kwargs(c_label, v_label, "", "", p_label, "")
+    assert kwargs["p_chip_size"] == half_m
 
 
 def test_extract_size_kwargs_invalid_list_does_not_fallback():
     c_label = gui._C_CHIP_SIZES[0][0]
     v_label = gui._V_CHUNK_SIZES[0][0]
+    p_label = gui._P_CHIP_SIZES[0][0]
     with pytest.raises(ValueError):
-        gui._extract_size_kwargs(c_label, v_label, "bad", "")
+        gui._extract_size_kwargs(c_label, v_label, "bad", "", p_label, "")
     with pytest.raises(ValueError):
-        gui._extract_size_kwargs(c_label, v_label, "", "0")
+        gui._extract_size_kwargs(c_label, v_label, "", "0", p_label, "")
+    with pytest.raises(ValueError):
+        gui._extract_size_kwargs(c_label, v_label, "", "", p_label, "bad")
 
 
 def test_set_controls_state_toggles_widget():

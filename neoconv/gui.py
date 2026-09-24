@@ -101,6 +101,16 @@ _V_CHUNK_SIZES = [
     ("16 MB",             16 * 1024 * 1024),
 ]
 
+# 0 = keep entire P region as a single p1 (default extract behaviour).
+_P_CHIP_SIZES = [
+    ("Entire as p1 (default)", 0),
+    ("512 KB",                   512 * 1024),
+    ("1 MB",                   1 * 1024 * 1024),
+    ("2 MB",                   2 * 1024 * 1024),
+    ("4 MB",                   4 * 1024 * 1024),
+    ("8 MB",                   8 * 1024 * 1024),
+]
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -200,6 +210,14 @@ def _v_bank_size_from_str(s: str) -> int:
     return V_BANK_SIZE
 
 
+def _p_chip_size_from_str(s: str) -> int | None:
+    """Return uniform P chip size, or ``None`` for entire-region-as-p1."""
+    for label, val in _P_CHIP_SIZES:
+        if s == label:
+            return val if val > 0 else None
+    return None
+
+
 def _optional_size_list(raw: str) -> list[int] | None:
     """Return ``None`` for blank input; otherwise parse via :func:`parse_size_list`."""
     text = raw.strip()
@@ -213,6 +231,8 @@ def _extract_size_kwargs(
     v_combo_label: str,
     c_list_raw: str,
     v_list_raw: str,
+    p_combo_label: str = "Entire as p1 (default)",
+    p_list_raw: str = "",
 ) -> dict:
     """
     Build extract kwargs: list sizes when free-text is set, else combo scalars.
@@ -222,7 +242,14 @@ def _extract_size_kwargs(
     """
     c_chip_sizes = _optional_size_list(c_list_raw)
     v_bank_sizes = _optional_size_list(v_list_raw)
+    p_chip_sizes = _optional_size_list(p_list_raw)
     kwargs: dict = {}
+    if p_chip_sizes is not None:
+        kwargs["p_chip_sizes"] = p_chip_sizes
+    else:
+        p_chip_size = _p_chip_size_from_str(p_combo_label)
+        if p_chip_size is not None:
+            kwargs["p_chip_size"] = p_chip_size
     if c_chip_sizes is not None:
         kwargs["c_chip_sizes"] = c_chip_sizes
     else:
@@ -463,7 +490,7 @@ class _SizeCombo(ttk.Frame):
         self.var = tk.StringVar(value=default_label)
         ttk.Combobox(self, textvariable=self.var,
                      values=[l for l, _ in options],
-                     state="readonly", width=22).pack(side="left", padx=4)
+                     state="readonly", width=24).pack(side="left", padx=4)
 
     @property
     def value_str(self) -> str:
@@ -607,6 +634,23 @@ class ExtractTab(ttk.Frame):
             row=1, column=1, sticky="w", padx=4, pady=2
         )
 
+        self._p_size = _SizeCombo(
+            opt_frame,
+            "P Chip Size:",
+            _P_CHIP_SIZES,
+            "Entire as p1 (default)",
+            label_width=lw,
+        )
+        self._p_size.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+        self._p_sizes_var = tk.StringVar()
+        ttk.Label(opt_frame, text="P chip sizes:", width=lw, anchor="w").grid(
+            row=3, column=0, sticky="w", pady=(4, 0)
+        )
+        ttk.Entry(opt_frame, textvariable=self._p_sizes_var, width=42).grid(
+            row=3, column=1, sticky="we", padx=4, pady=(4, 0)
+        )
+
         self._c_size = _SizeCombo(
             opt_frame,
             "C Chip Size:",
@@ -614,14 +658,14 @@ class ExtractTab(ttk.Frame):
             "2 MB (default)",
             label_width=lw,
         )
-        self._c_size.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self._c_size.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         self._c_sizes_var = tk.StringVar()
         ttk.Label(opt_frame, text="C chip sizes:", width=lw, anchor="w").grid(
-            row=3, column=0, sticky="w", pady=(4, 0)
+            row=5, column=0, sticky="w", pady=(4, 0)
         )
         ttk.Entry(opt_frame, textvariable=self._c_sizes_var, width=42).grid(
-            row=3, column=1, sticky="we", padx=4, pady=(4, 0)
+            row=5, column=1, sticky="we", padx=4, pady=(4, 0)
         )
 
         self._v_size = _SizeCombo(
@@ -631,25 +675,26 @@ class ExtractTab(ttk.Frame):
             "2 MB (default)",
             label_width=lw,
         )
-        self._v_size.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self._v_size.grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         self._v_sizes_var = tk.StringVar()
         ttk.Label(opt_frame, text="V bank sizes:", width=lw, anchor="w").grid(
-            row=5, column=0, sticky="w", pady=(4, 0)
+            row=7, column=0, sticky="w", pady=(4, 0)
         )
         ttk.Entry(opt_frame, textvariable=self._v_sizes_var, width=42).grid(
-            row=5, column=1, sticky="we", padx=4, pady=(4, 0)
+            row=7, column=1, sticky="we", padx=4, pady=(4, 0)
         )
 
         ttk.Label(
             opt_frame,
             text=(
                 "Leave size lists empty unless chips/banks have different sizes "
-                "(comma-separated bytes, same as --c-chip-sizes / --v-bank-sizes)."
+                "(comma-separated bytes, same as --p-chip-sizes / --c-chip-sizes / "
+                "--v-bank-sizes). P default keeps one p1."
             ),
             wraplength=520,
             justify="left",
-        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(6, 0))
         row += 1
 
         ctrl_row = ttk.Frame(self)
@@ -688,6 +733,8 @@ class ExtractTab(ttk.Frame):
                 self._v_size.value_str,
                 self._c_sizes_var.get(),
                 self._v_sizes_var.get(),
+                self._p_size.value_str,
+                self._p_sizes_var.get(),
             )
         except ValueError as exc:
             messagebox.showerror("Error", f"Invalid size list: {exc}")
@@ -713,6 +760,17 @@ class ExtractTab(ttk.Frame):
                 neo_data = neo_path.read_bytes()
                 romset = parse_neo(neo_data)
                 self._wbridge.post_log(f"Reading: {neo_path}")
+                if "p_chip_sizes" in size_kwargs:
+                    sizes = size_kwargs["p_chip_sizes"]
+                    self._wbridge.post_log(
+                        f"P chip sizes: {', '.join(f'{s:,}' for s in sizes)} bytes"
+                    )
+                elif "p_chip_size" in size_kwargs:
+                    self._wbridge.post_log(
+                        f"P chip size: {size_kwargs['p_chip_size']:,} bytes"
+                    )
+                else:
+                    self._wbridge.post_log("P chip size: entire region as p1")
                 if "c_chip_sizes" in size_kwargs:
                     sizes = size_kwargs["c_chip_sizes"]
                     self._wbridge.post_log(
