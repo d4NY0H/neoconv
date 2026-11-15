@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import secrets
+import stat
 import struct
 import warnings
 from pathlib import Path
@@ -286,21 +288,83 @@ def replace_neo_metadata(
     return bytes(header) + neo_data[NEO_HEADER_SIZE:]
 
 
+def _fsync_directory(directory: Path) -> None:
+    """
+    Best-effort ``fsync`` of *directory* so a rename is durable.
+
+    Directory ``fsync`` is not available or not permitted on every platform
+    (notably Windows), so failures are ignored: the data file itself was
+    already synced before the rename.
+    """
+    try:
+        fd = os.open(str(directory), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 def write_bytes_atomic(path: Path | str, data: bytes) -> None:
     """
-    Write *data* to *path* via a temporary file in the same directory and
-    ``os.replace`` (atomic on POSIX when replacing an existing file).
+    Write *data* to *path* atomically and durably.
+
+    The content goes to a unique, exclusively created temporary file in the
+    destination directory (unpredictable name, ``O_EXCL``), is flushed and
+    ``fsync``-ed, then moved into place with :func:`os.replace`. The parent
+    directory is ``fsync``-ed afterwards on platforms that support it.
+
+    *path* is used as given: it is never resolved, so a symbolic link at that
+    exact path is **replaced as a link** rather than followed, and the link
+    target is never modified. Existing regular-file permissions are preserved
+    when replacing; new files get the default mode allowed by the process
+    umask (``0o666`` masked).
     """
-    p = Path(path).resolve()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.parent / f".neoconv_{p.name}.{os.getpid()}.tmp"
+    target = Path(path)
+    parent = target.parent
+    parent.mkdir(parents=True, exist_ok=True)
+
+    # Preserve the mode of an existing regular file. A symlink is not followed:
+    # replacing it creates a new regular file with the umask default.
+    existing_mode: Optional[int] = None
     try:
-        tmp.write_bytes(data)
-        os.replace(tmp, p)
+        st = os.lstat(target)
+    except OSError:
+        pass
+    else:
+        if stat.S_ISREG(st.st_mode):
+            existing_mode = stat.S_IMODE(st.st_mode)
+
+    tmp = parent / f".neoconv-{secrets.token_hex(8)}.tmp"
+    fd: Optional[int] = None
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        if existing_mode is not None:
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, existing_mode)
+            else:  # pragma: no cover - Windows has no fchmod
+                os.chmod(tmp, existing_mode)
+        with os.fdopen(fd, "wb") as fh:
+            fd = None  # ownership transferred to the file object
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, target)
+        _fsync_directory(parent)
     except BaseException:
-        if tmp.exists():
+        if fd is not None:
             try:
-                tmp.unlink()
+                os.close(fd)
             except OSError:
                 pass
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
         raise

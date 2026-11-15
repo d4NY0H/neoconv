@@ -10,8 +10,69 @@ from pathlib import Path
 from typing import Optional
 
 from .constants import C_CHIP_SIZE_DEFAULT, V_BANK_SIZE
+from .exceptions import InvalidConfigurationError
 from .models import RomSet
 from .neo_format import parse_neo
+
+_INVALID_PREFIX_HINT = (
+    "Pass a single filename component (for example --prefix turfmast) and use "
+    "--out-dir / --out to choose the destination directory."
+)
+
+
+def validate_name_prefix(name_prefix: str) -> str:
+    """
+    Validate that *name_prefix* is one safe filename component.
+
+    Output names are built as ``<prefix>-<role><n><ext>``. Because the prefix is
+    concatenated directly into that name, it must not be able to introduce path
+    separators, an absolute path, a drive/scheme form, or control characters;
+    otherwise ``--prefix ../../evil`` (or a crafted ZIP name) could write outside
+    the requested output directory or produce a malformed archive member.
+
+    Returns *name_prefix* unchanged when it is safe.
+
+    Raises
+    ------
+    InvalidConfigurationError
+        For an empty prefix, ``.`` / ``..``, absolute or drive-like forms, path
+        separators (``/`` or ``\\``), NUL, or other control characters.
+    """
+    if not isinstance(name_prefix, str):
+        raise InvalidConfigurationError(
+            f"Output filename prefix must be a string (got {type(name_prefix).__name__}).",
+            hint=_INVALID_PREFIX_HINT,
+        )
+    if name_prefix == "":
+        raise InvalidConfigurationError(
+            "Output filename prefix must not be empty.",
+            hint="Omit --prefix to use the input filename, or pass a name such as 'turfmast'.",
+        )
+    if name_prefix in (".", ".."):
+        raise InvalidConfigurationError(
+            f"Invalid output filename prefix {name_prefix!r}: relative path "
+            "components are not allowed.",
+            hint=_INVALID_PREFIX_HINT,
+        )
+    if "/" in name_prefix or "\\" in name_prefix:
+        raise InvalidConfigurationError(
+            f"Invalid output filename prefix {name_prefix!r}: path separators "
+            "are not allowed.",
+            hint=_INVALID_PREFIX_HINT,
+        )
+    if ":" in name_prefix:
+        raise InvalidConfigurationError(
+            f"Invalid output filename prefix {name_prefix!r}: drive letters and "
+            "scheme separators (':') are not allowed.",
+            hint=_INVALID_PREFIX_HINT,
+        )
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in name_prefix):
+        raise InvalidConfigurationError(
+            f"Invalid output filename prefix {name_prefix!r}: control "
+            "characters are not allowed.",
+            hint=_INVALID_PREFIX_HINT,
+        )
+    return name_prefix
 
 
 def parse_size_list(value: str) -> list[int]:
@@ -84,7 +145,8 @@ def extract_romset(
     ----------
     romset       : parsed ROM regions
     output_dir   : destination directory
-    name_prefix  : filename prefix (e.g. 'turfmast' -> turfmast-p1.bin)
+    name_prefix  : filename prefix, one path component (e.g. 'turfmast' ->
+                   turfmast-p1.bin)
     fmt          : 'mame' -> .bin extension, 'darksoft' -> .rom extension
     c_chip_size  : uniform size of each C chip in bytes (default 2 MB).
                    Ignored when *c_chip_sizes* is set.
@@ -99,10 +161,25 @@ def extract_romset(
                    :class:`~neoconv.core.UserCancelledError` to abort.
 
     Returns dict mapping role -> output Path.
+
+    Raises
+    ------
+    InvalidConfigurationError
+        For an invalid *name_prefix*, or for inconsistent P/V/C chip sizes.
+        Every split is computed before the first write, so a failing split
+        leaves no partial P/S/M/V output behind.
     """
+    validate_name_prefix(name_prefix)
     if v_bank_sizes is None:
         _warn_v_bank_size_remainder(romset, v_bank_size)
     ext = ".bin" if fmt == "mame" else ".rom"
+
+    # Compute every split up front: an invalid C (or P/V) configuration must
+    # not leave partial P/S/M/V files behind in the output directory.
+    p_chips = romset.p_chips(chip_size=p_chip_size, chip_sizes=p_chip_sizes)
+    v_chunks = romset.v_chunks(bank_size=v_bank_size, bank_sizes=v_bank_sizes)
+    c_chips = romset.c_chips(chip_size=c_chip_size, chip_sizes=c_chip_sizes)
+
     output_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
 
@@ -115,21 +192,15 @@ def extract_romset(
         written[role + suffix] = p
         return p
 
-    for i, chip in enumerate(
-        romset.p_chips(chip_size=p_chip_size, chip_sizes=p_chip_sizes), start=1
-    ):
+    for i, chip in enumerate(p_chips, start=1):
         _write_rom("p", chip, suffix=str(i))
     _write_rom("s1", romset.s)
     _write_rom("m1", romset.m)
 
-    for i, chunk in enumerate(
-        romset.v_chunks(bank_size=v_bank_size, bank_sizes=v_bank_sizes), start=1
-    ):
+    for i, chunk in enumerate(v_chunks, start=1):
         _write_rom("v", chunk, suffix=str(i))
 
-    for i, chip in enumerate(
-        romset.c_chips(chip_size=c_chip_size, chip_sizes=c_chip_sizes), start=1
-    ):
+    for i, chip in enumerate(c_chips, start=1):
         _write_rom("c", chip, suffix=str(i))
 
     _poll_cancel(cancel_check)
@@ -157,7 +228,8 @@ def extract_neo(
     ----------
     neo_data     : raw bytes of the .neo file
     output_dir   : destination directory
-    name_prefix  : filename prefix (e.g. 'turfmast' -> turfmast-p1.bin)
+    name_prefix  : filename prefix, one path component (e.g. 'turfmast' ->
+                   turfmast-p1.bin)
     fmt          : 'mame' -> .bin extension, 'darksoft' -> .rom extension
     c_chip_size  : uniform C chip size (ignored when *c_chip_sizes* is set).
     v_bank_size  : uniform V bank size (ignored when *v_bank_sizes* is set).
@@ -210,30 +282,37 @@ def extract_romset_to_zip(
     v_bank_sizes : explicit per-file sizes for mixed V sets.
     p_chip_sizes : explicit per-file sizes for multi-chip P sets.
     cancel_check : optional cancellation callback (see :func:`extract_romset`).
+
+    Raises
+    ------
+    InvalidConfigurationError
+        For an invalid *name_prefix* or inconsistent P/V/C chip sizes. All
+        splits are computed before the ZIP is built, so a failure writes no
+        archive and no files.
     """
+    validate_name_prefix(name_prefix)
     if v_bank_sizes is None:
         _warn_v_bank_size_remainder(romset, v_bank_size)
     ext = ".bin" if fmt == "mame" else ".rom"
+
+    p_chips = romset.p_chips(chip_size=p_chip_size, chip_sizes=p_chip_sizes)
+    v_chunks = romset.v_chunks(bank_size=v_bank_size, bank_sizes=v_bank_sizes)
+    c_chips = romset.c_chips(chip_size=c_chip_size, chip_sizes=c_chip_sizes)
+
     buf = io.BytesIO()
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for i, chip in enumerate(
-            romset.p_chips(chip_size=p_chip_size, chip_sizes=p_chip_sizes), start=1
-        ):
+        for i, chip in enumerate(p_chips, start=1):
             _poll_cancel(cancel_check)
             zf.writestr(f"{name_prefix}-p{i}{ext}", chip)
         _poll_cancel(cancel_check)
         zf.writestr(f"{name_prefix}-s1{ext}", romset.s)
         _poll_cancel(cancel_check)
         zf.writestr(f"{name_prefix}-m1{ext}", romset.m)
-        for i, chunk in enumerate(
-            romset.v_chunks(bank_size=v_bank_size, bank_sizes=v_bank_sizes), start=1
-        ):
+        for i, chunk in enumerate(v_chunks, start=1):
             _poll_cancel(cancel_check)
             zf.writestr(f"{name_prefix}-v{i}{ext}", chunk)
-        for i, chip in enumerate(
-            romset.c_chips(chip_size=c_chip_size, chip_sizes=c_chip_sizes), start=1
-        ):
+        for i, chip in enumerate(c_chips, start=1):
             _poll_cancel(cancel_check)
             zf.writestr(f"{name_prefix}-c{i}{ext}", chip)
 

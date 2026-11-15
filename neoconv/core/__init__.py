@@ -60,6 +60,7 @@ from .extract import (
     extract_romset,
     extract_romset_to_zip,
     parse_size_list,
+    validate_name_prefix,
     warn_overwriting_path,
     neo_to_darksoft_zip,
     neo_to_mame_zip,
@@ -73,6 +74,7 @@ from .mame_parse import (
     pack_psm_role_from_basename,
     parse_mame_dir,
     parse_mame_zip,
+    read_p_rom_from_zip,
     roles_to_romset,
 )
 from .exceptions import (
@@ -131,6 +133,7 @@ __all__ = [
     "extract_romset",
     "extract_romset_to_zip",
     "parse_size_list",
+    "validate_name_prefix",
     "warn_overwriting_path",
     "mame_dir_to_neo",
     "mame_zip_to_neo",
@@ -139,6 +142,7 @@ __all__ = [
     "pack_psm_role_from_basename",
     "parse_mame_dir",
     "parse_mame_zip",
+    "read_p_rom_from_zip",
     "parse_neo",
     "parse_neo_header_metadata",
     "replace_neo_metadata",

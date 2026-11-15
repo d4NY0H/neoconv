@@ -25,6 +25,14 @@ def _mini_zip_bytes() -> bytes:
     return buf.getvalue()
 
 
+def _role_zip_bytes(roles: list[tuple[str, bytes]]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, data in roles:
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
 def _write_complete_dir(root: Path, *, include_s: bool = True) -> None:
     """Small complete P/S/M/V/C set; optional s1 omission for synthetic-S tests."""
     root.mkdir(exist_ok=True)
@@ -35,11 +43,6 @@ def _write_complete_dir(root: Path, *, include_s: bool = True) -> None:
     (root / "game-v1.bin").write_bytes(b"v" * 1024)
     (root / "game-c1.bin").write_bytes(b"\x11" * (512 * 1024))
     (root / "game-c2.bin").write_bytes(b"\x22" * (512 * 1024))
-
-
-class _FakeRomset:
-    def __init__(self, p: bytes = b"\x00" * 1024):
-        self.p = p
 
 
 def _exit_raiser(code: int = 0):
@@ -709,11 +712,17 @@ def test_cli_pack_negative_v2_size_fails_cleanly(monkeypatch, tmp_path, capsys):
 def test_cmd_detect_swap_from_zip(monkeypatch, tmp_path, capsys):
     zpath = tmp_path / "set.zip"
     zpath.write_bytes(_mini_zip_bytes())
-    monkeypatch.setattr(cli, "parse_mame_zip", lambda _p, **_kw: _FakeRomset())
-    monkeypatch.setattr(cli, "detect_swap_p_needed", lambda _p: (False, "ok heuristic"))
+    seen: dict[str, bytes] = {}
+
+    def _detect(p):
+        seen["p"] = p
+        return False, "ok heuristic"
+
+    monkeypatch.setattr(cli, "detect_swap_p_needed", _detect)
     cli.cmd_detect_swap(argparse.Namespace(input=str(zpath)))
     out = capsys.readouterr().out
     assert "Inspecting P-ROM from ZIP:" in out
+    assert seen["p"] == b"rom"
     assert "--swap-p no" in out
     assert "not needed" in out
     assert "(default)" not in out
@@ -735,6 +744,72 @@ def test_cmd_detect_swap_missing_exits(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         cli.cmd_detect_swap(argparse.Namespace(input=str(tmp_path / "missing.bin")))
     assert exc.value.code == 1
+
+
+def test_cmd_detect_swap_p_only_zip(monkeypatch, tmp_path, capsys):
+    z = tmp_path / "p_only.zip"
+    z.write_bytes(_role_zip_bytes([("game-p1.bin", b"\xff" * 512)]))
+    seen: dict[str, bytes] = {}
+
+    def _detect(p: bytes):
+        seen["p"] = p
+        return False, "p-only ok"
+
+    monkeypatch.setattr(cli, "detect_swap_p_needed", _detect)
+    cli.cmd_detect_swap(argparse.Namespace(input=str(z)))
+    assert seen["p"] == b"\xff" * 512
+    assert "Inspecting P-ROM from ZIP:" in capsys.readouterr().out
+
+
+def test_cmd_detect_swap_full_valid_zip(monkeypatch, tmp_path, capsys):
+    from neoconv.core import (
+        NeoMeta,
+        RomSet,
+        build_neo,
+        extract_neo_to_zip,
+        interleave_c_chips,
+    )
+
+    half_m = 512 * 1024
+    rs = RomSet(
+        p=b"\xAA" * (2 * half_m),
+        s=b"\xBB" * 1024,
+        m=b"\xCC" * 1024,
+        v=b"\xDD" * 2048,
+        c=interleave_c_chips([b"\x11" * half_m, b"\x22" * half_m]),
+    )
+    zip_bytes = extract_neo_to_zip(
+        build_neo(rs, NeoMeta(name="Full")),
+        name_prefix="game",
+        fmt="mame",
+        p_chip_sizes=[half_m, half_m],
+        v_bank_size=1024,
+        c_chip_size=half_m,
+    )
+    z = tmp_path / "full.zip"
+    z.write_bytes(zip_bytes)
+    seen: dict[str, bytes] = {}
+
+    def _detect(p: bytes):
+        seen["p"] = p
+        return True, "full set ok"
+
+    monkeypatch.setattr(cli, "detect_swap_p_needed", _detect)
+    cli.cmd_detect_swap(argparse.Namespace(input=str(z)))
+    assert seen["p"] == rs.p
+    assert "required" in capsys.readouterr().out
+
+
+def test_detect_swap_zip_missing_p_exits_cleanly(monkeypatch, tmp_path, capsys):
+    z = tmp_path / "no_p.zip"
+    z.write_bytes(_role_zip_bytes([("game-s1.bin", b"s"), ("game-m1.bin", b"m")]))
+    monkeypatch.setattr(cli.sys, "argv", ["neoconv", "detect-swap", str(z)])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "No P (program) ROM" in err
+    assert "Traceback" not in err
 
 
 def test_cmd_info(monkeypatch, tmp_path, capsys):
@@ -902,4 +977,122 @@ def test_neoconv_main_module_invokes_cli_main(monkeypatch):
 
     runpy.run_module("neoconv.__main__", run_name="__main__")
     assert called == [1]
+
+
+# ---------------------------------------------------------------------------
+# Wave 3: uint32 metadata validation and extract prefix safety
+# ---------------------------------------------------------------------------
+
+def test_uint32_parser_accepts_bounds():
+    parser = cli.build_parser()
+    assert parser.parse_args(["pack", "in.zip", "--year", "0"]).year == 0
+    pack = parser.parse_args(
+        [
+            "pack",
+            "in.zip",
+            "--year",
+            "4294967295",
+            "--screenshot",
+            "0xFFFFFFFF",
+            "--ngh",
+            "4294967295",
+        ]
+    )
+    assert pack.year == 0xFFFFFFFF
+    assert pack.screenshot == 0xFFFFFFFF
+    assert pack.ngh == 0xFFFFFFFF
+
+    edit = parser.parse_args(
+        ["edit", "in.neo", "--year", "0", "--screenshot", "4294967295"]
+    )
+    assert edit.year == 0
+    assert edit.screenshot == 0xFFFFFFFF
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["pack", "in.zip", "--year", "-1"],
+        ["pack", "in.zip", "--screenshot", "-1"],
+        ["pack", "in.zip", "--ngh", "4294967296"],
+        ["edit", "in.neo", "--year", "-1"],
+        ["edit", "in.neo", "--screenshot", "-1"],
+        ["edit", "in.neo", "--ngh", "4294967296"],
+        ["edit", "in.neo", "--year", "not-a-number"],
+    ],
+)
+def test_uint32_cli_rejects_out_of_range(monkeypatch, capsys, argv):
+    monkeypatch.setattr(cli.sys, "argv", ["neoconv", *argv])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert "error:" in err
+
+
+def test_cli_pack_uint32_max_roundtrips_header(monkeypatch, tmp_path):
+    roms = tmp_path / "roms"
+    roms.mkdir()
+    (roms / "dummy.bin").write_bytes(b"x")
+    out = tmp_path / "out.neo"
+    _patch_pack_romset(monkeypatch)
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        [
+            "neoconv",
+            "pack",
+            str(roms),
+            "--swap-p",
+            "no",
+            "--year",
+            "4294967295",
+            "--screenshot",
+            "4294967295",
+            "--ngh",
+            "4294967295",
+            "-o",
+            str(out),
+        ],
+    )
+    cli.main()
+    meta = parse_neo(out.read_bytes()).meta
+    assert (meta.year, meta.screenshot, meta.ngh) == (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
+
+
+def test_cli_edit_uint32_max(tmp_path):
+    neo = tmp_path / "x.neo"
+    neo.write_bytes(_mini_neo_bytes())
+    cli.cmd_edit(_edit_ns(neo, year=0, screenshot=0xFFFFFFFF, ngh=0xFFFFFFFF))
+    meta = parse_neo(neo.read_bytes()).meta
+    assert (meta.year, meta.screenshot, meta.ngh) == (0, 0xFFFFFFFF, 0xFFFFFFFF)
+
+
+def test_cli_extract_rejects_traversal_prefix(monkeypatch, tmp_path, capsys):
+    neo = tmp_path / "game.neo"
+    neo.write_bytes(_mini_neo_bytes())
+    out_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        [
+            "neoconv",
+            "extract",
+            str(neo),
+            "--prefix",
+            "../evil",
+            "--out-dir",
+            str(out_dir),
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "path separators" in err
+    assert "Traceback" not in err
+    assert not (tmp_path / "evil-p1.bin").exists()
+    assert not out_dir.exists()
+
 

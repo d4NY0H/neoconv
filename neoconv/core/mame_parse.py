@@ -682,6 +682,46 @@ def parse_mame_zip(
     )
 
 
+def read_p_rom_from_zip(zip_path: Path) -> bytes:
+    """
+    Read only the P-ROM data from a MAME-style ZIP.
+
+    Intended for inspection commands such as ``detect-swap`` that need nothing
+    but the program ROM. Members are classified with :func:`name_to_role`;
+    only ``P`` (``p1``) and ``P2`` (``p2``) members are read and concatenated
+    (P followed by P2). Other members are ignored entirely, and neither the
+    mandatory P/S/M/V/C gate nor the known-unsupported-set denylist applies,
+    so a P-only ZIP is enough.
+
+    Raises
+    ------
+    InvalidRomLayoutError
+        When the ZIP cannot be opened or contains no P/P2 member.
+    """
+    p_parts: list[bytes] = []
+    p2_parts: list[bytes] = []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            for entry in zf.infolist():
+                if entry.is_dir():
+                    continue
+                role = name_to_role(entry.filename)
+                if role == "P":
+                    p_parts.append(zf.read(entry.filename))
+                elif role == "P2":
+                    p2_parts.append(zf.read(entry.filename))
+    except zipfile.BadZipFile as e:
+        raise InvalidRomLayoutError(f"Cannot open ZIP file '{zip_path}': {e}") from e
+
+    if not p_parts:
+        raise InvalidRomLayoutError(
+            f"No P (program) ROM in ZIP '{zip_path}'. Expected a p1 member "
+            "(e.g. game-p1.bin or game.p1).",
+            hint="detect-swap only needs the P-ROM; check the ZIP contains one.",
+        )
+    return b"".join(p_parts) + b"".join(p2_parts)
+
+
 def parse_mame_dir(
     dir_path: Path,
     diagnostic: bool = False,

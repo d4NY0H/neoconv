@@ -50,9 +50,9 @@ from .core import (
     mame_dir_to_neo,
     mame_zip_to_neo,
     parse_mame_dir,
-    parse_mame_zip,
     parse_neo,
     parse_size_list,
+    read_p_rom_from_zip,
     replace_neo_metadata,
     resolve_genre,
     warn_overwriting_path,
@@ -75,6 +75,33 @@ def _genre_type(value: str) -> int:
         return resolve_genre(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+_UINT32_MAX = 0xFFFFFFFF
+
+
+def _uint32_type(value: str) -> int:
+    """argparse ``type=`` adapter for uint32 header fields.
+
+    ``--year``, ``--screenshot`` and ``--ngh`` are packed into 4-byte header
+    fields, so values outside ``0..0xFFFFFFFF`` would raise an uncaught
+    :class:`struct.error` later. Rejecting them here turns that into a normal
+    argparse usage error. Decimal input is accepted, as are explicit
+    ``0x``/``0o``/``0b`` prefixes.
+    """
+    text = value.strip()
+    base = 0 if text.lower().startswith(("0x", "0o", "0b")) else 10
+    try:
+        number = int(text, base)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"invalid integer: {value!r}"
+        ) from exc
+    if not 0 <= number <= _UINT32_MAX:
+        raise argparse.ArgumentTypeError(
+            f"must be between 0 and {_UINT32_MAX} (got {number})"
+        )
+    return number
 
 
 def _meta_from_args(args: argparse.Namespace) -> NeoMeta:
@@ -289,13 +316,9 @@ def cmd_detect_swap(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if _zf.is_zipfile(src):
-        # detect-swap only needs the P-ROM. Allow extra files / synthetic S so
-        # this inspection command keeps working on sets that would fail a
-        # strict pack; missing mandatory ROMs still raise.
-        romset = parse_mame_zip(
-            src, allow_extra_files=True, allow_synthetic_s=True
-        )
-        p_rom = romset.p
+        # detect-swap only needs the P-ROM. Read p1/p2 members directly so a
+        # P-only ZIP (or a set that the strict pack gates reject) still works.
+        p_rom = read_p_rom_from_zip(src)
         print(f"Inspecting P-ROM from ZIP: {src}  ({len(p_rom):,} bytes)")
     else:
         p_rom = src.read_bytes()
@@ -454,13 +477,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_pack.add_argument("--out", "-o", default="", help="Output .neo path")
     p_pack.add_argument("--name", "-n", default="Unknown", help="Game name")
     p_pack.add_argument("--manufacturer", "-m", default="Unknown", help="Manufacturer")
-    p_pack.add_argument("--year", "-y", type=int, default=0, help="Release year")
+    p_pack.add_argument("--year", "-y", type=_uint32_type, default=0, help="Release year (uint32)")
     p_pack.add_argument(
         "--genre", "-g", default=_genre_type("Other"), type=_genre_type,
         help=f"Genre: {', '.join(GENRES.values())}"
     )
-    p_pack.add_argument("--ngh", type=int, default=0, help="NGH number")
-    p_pack.add_argument("--screenshot", type=int, default=0, help="Screenshot number (TerraOnion)")
+    p_pack.add_argument("--ngh", type=_uint32_type, default=0, help="NGH number (uint32)")
+    p_pack.add_argument(
+        "--screenshot",
+        type=_uint32_type,
+        default=0,
+        help="Screenshot number (TerraOnion, uint32)",
+    )
     p_pack.add_argument(
         "--swap-p",
         choices=["auto", "yes", "no"],
@@ -534,7 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_edit.add_argument("--name", "-n", default=None, help="Game name")
     p_edit.add_argument("--manufacturer", "-m", default=None, help="Manufacturer")
-    p_edit.add_argument("--year", "-y", type=int, default=None, help="Release year")
+    p_edit.add_argument("--year", "-y", type=_uint32_type, default=None, help="Release year (uint32)")
     p_edit.add_argument(
         "--genre",
         "-g",
@@ -543,8 +571,13 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="NAME_OR_ID",
         help=f"Genre name or id ({', '.join(GENRES.values())})",
     )
-    p_edit.add_argument("--ngh", type=int, default=None, help="NGH number")
-    p_edit.add_argument("--screenshot", type=int, default=None, help="Screenshot number (TerraOnion)")
+    p_edit.add_argument("--ngh", type=_uint32_type, default=None, help="NGH number (uint32)")
+    p_edit.add_argument(
+        "--screenshot",
+        type=_uint32_type,
+        default=None,
+        help="Screenshot number (TerraOnion, uint32)",
+    )
     p_edit.set_defaults(func=cmd_edit)
 
     # -- info --

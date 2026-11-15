@@ -6,6 +6,8 @@ Run with:  python -m pytest tests/ -v
 
 import hashlib
 import io
+import os
+import stat
 import struct
 import warnings
 import zipfile
@@ -44,8 +46,10 @@ from neoconv.core import (
     parse_mame_zip,
     parse_neo,
     parse_neo_header_metadata,
+    read_p_rom_from_zip,
     replace_neo_metadata,
     swap_p_banks,
+    validate_name_prefix,
     verify_roundtrip,
     write_bytes_atomic,
 )
@@ -1935,3 +1939,205 @@ class TestEndToEndRoundtrip:
 
         result = verify_roundtrip(original_neo, rebuilt_neo)
         assert result.ok, f"Swap roundtrip failed: {result.details}"
+
+
+# ---------------------------------------------------------------------------
+# Wave 3: extraction safety, atomic writes, P-only ZIP reading
+# ---------------------------------------------------------------------------
+
+class TestExtractionSafety:
+    @pytest.mark.parametrize(
+        "prefix",
+        ["game", "038", "a.b-c_d", "turfmast", "ünïcode"],
+    )
+    def test_validate_name_prefix_accepts_plain_component(self, prefix):
+        assert validate_name_prefix(prefix) == prefix
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "",
+            ".",
+            "..",
+            "../evil",
+            "..\\evil",
+            "/tmp/evil",
+            "C:evil",
+            "C:\\temp\\evil",
+            "sub/evil",
+            "sub\\evil",
+            "bad\x00name",
+            "bad\nname",
+            "bad\x1fname",
+            "bad\x7fname",
+        ],
+    )
+    def test_validate_name_prefix_rejects_unsafe(self, prefix):
+        with pytest.raises(InvalidConfigurationError, match="prefix"):
+            validate_name_prefix(prefix)
+
+    def test_validate_name_prefix_rejects_non_string(self):
+        with pytest.raises(InvalidConfigurationError, match="must be a string"):
+            validate_name_prefix(None)  # type: ignore[arg-type]
+
+    def test_extract_romset_rejects_unsafe_prefix_without_writing(self, tmp_path):
+        rs = make_romset()
+        cases = [
+            "../evil",
+            "..\\evil",
+            str(tmp_path / "evil"),
+            "C:evil",
+            "sub/evil",
+            "sub\\evil",
+            ".",
+            "..",
+            "",
+            "bad\x00name",
+        ]
+        for i, prefix in enumerate(cases):
+            out = tmp_path / f"out{i}"
+            with pytest.raises(InvalidConfigurationError, match="prefix"):
+                extract_romset(rs, out, name_prefix=prefix, v_bank_size=1024 * 1024)
+            assert not out.exists()
+        # Nothing (not even "evil-p1.bin") escaped next to the output directory.
+        assert sorted(p.name for p in tmp_path.iterdir()) == []
+
+    def test_extract_romset_to_zip_rejects_unsafe_prefix(self, tmp_path):
+        rs = make_romset()
+        for prefix in ["../evil", "..\\evil", str(tmp_path / "evil"), "C:evil"]:
+            with pytest.raises(InvalidConfigurationError, match="prefix"):
+                extract_romset_to_zip(
+                    rs, name_prefix=prefix, v_bank_size=1024 * 1024
+                )
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"c_chip_size": 100},
+            {"p_chip_sizes": [1024]},
+            {"v_bank_sizes": [1024]},
+        ],
+    )
+    def test_invalid_split_leaves_no_output_files(self, tmp_path, kwargs):
+        rs = make_romset()
+        out = tmp_path / "out"
+
+        with pytest.raises(InvalidConfigurationError):
+            extract_romset(rs, out, name_prefix="g", **kwargs)
+
+        assert not out.exists()
+
+        with pytest.raises(InvalidConfigurationError):
+            extract_romset_to_zip(rs, name_prefix="g", **kwargs)
+
+    def test_invalid_c_does_not_leave_p_s_m_v(self, tmp_path):
+        rs = RomSet(
+            p=make_rom(4096, 0xAA),
+            s=make_rom(128, 0xBB),
+            m=make_rom(128, 0xCC),
+            v=make_rom(256, 0xDD),
+            c=b"\x00" * 100,  # not a multiple of chip_size * 2
+        )
+        out = tmp_path / "out"
+        with pytest.raises(InvalidConfigurationError, match="not a multiple"):
+            extract_romset(rs, out, name_prefix="g", v_bank_size=256)
+
+        assert not out.exists()
+        assert list(tmp_path.iterdir()) == []
+
+
+class TestWriteBytesAtomicHardening:
+    def test_replaces_content(self, tmp_path):
+        p = tmp_path / "out.neo"
+        write_bytes_atomic(p, b"alpha")
+        write_bytes_atomic(p, b"beta")
+        assert p.read_bytes() == b"beta"
+
+    def test_preserves_existing_file_mode(self, tmp_path):
+        p = tmp_path / "existing.neo"
+        p.write_bytes(b"old")
+        os.chmod(p, 0o600)
+        try:
+            write_bytes_atomic(p, b"new")
+            assert p.read_bytes() == b"new"
+            assert stat.S_IMODE(p.stat().st_mode) == 0o600
+        finally:
+            os.chmod(p, 0o600)
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+    def test_new_file_mode_follows_umask(self, tmp_path):
+        p = tmp_path / "new-file.neo"
+        old = os.umask(0o077)
+        try:
+            write_bytes_atomic(p, b"x")
+        finally:
+            os.umask(old)
+        assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+        q = tmp_path / "new-file-umask-zero.neo"
+        old = os.umask(0)
+        try:
+            write_bytes_atomic(q, b"y")
+        finally:
+            os.umask(old)
+        assert stat.S_IMODE(q.stat().st_mode) == 0o666
+
+    def test_does_not_modify_symlink_target(self, tmp_path):
+        target = tmp_path / "target.bin"
+        target.write_bytes(b"original")
+        link = tmp_path / "link.neo"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):  # pragma: no cover - platform
+            pytest.skip("symlinks are not available")
+
+        write_bytes_atomic(link, b"new")
+
+        assert target.read_bytes() == b"original"
+        assert not link.is_symlink()
+        assert link.read_bytes() == b"new"
+
+    def test_cleans_up_temp_file_on_failure(self, tmp_path):
+        target_dir = tmp_path / "target.neo"
+        target_dir.mkdir()
+        with pytest.raises(OSError):
+            write_bytes_atomic(target_dir, b"x")
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["target.neo"]
+
+
+class TestPOnlyZipReader:
+    def test_p_only_zip(self, tmp_path):
+        z = tmp_path / "p_only.zip"
+        write_role_zip(z, [("game-p1.bin", b"PROGRAM")])
+        assert read_p_rom_from_zip(z) == b"PROGRAM"
+
+    def test_concatenates_p1_and_p2_in_order(self, tmp_path):
+        z = tmp_path / "full.zip"
+        write_role_zip(
+            z,
+            [
+                ("game-s1.bin", b"TEXT"),
+                ("game-p2.bin", b"SECOND"),
+                ("game-p1.bin", b"FIRST"),
+                ("game-m1.bin", b"Z80"),
+            ],
+        )
+        assert read_p_rom_from_zip(z) == b"FIRSTSECOND"
+
+    def test_bypasses_denylist_and_missing_other_roms(self, tmp_path):
+        z = tmp_path / "kotm2p.zip"
+        write_role_zip(z, [("kotm2p-p1.bin", b"P")])
+        assert read_p_rom_from_zip(z) == b"P"
+
+    def test_missing_p_raises_typed_error(self, tmp_path):
+        z = tmp_path / "no_p.zip"
+        write_role_zip(z, [("game-s1.bin", b"S"), ("game-m1.bin", b"M")])
+        with pytest.raises(InvalidRomLayoutError, match="No P \\(program\\) ROM"):
+            read_p_rom_from_zip(z)
+
+    def test_bad_zip_raises_typed_error(self, tmp_path):
+        z = tmp_path / "not.zip"
+        z.write_bytes(b"not a zip")
+        with pytest.raises(InvalidRomLayoutError, match="Cannot open ZIP file"):
+            read_p_rom_from_zip(z)
+
