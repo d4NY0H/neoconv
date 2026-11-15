@@ -312,11 +312,17 @@ def _list_pack_input_filenames(src: Path) -> list[str]:
     return []
 
 
-def _scan_pack_preflight(src: Path) -> tuple[set[str], list[str]]:
+def _scan_pack_preflight(
+    src: Path,
+    *,
+    allow_synthetic_s: bool = False,
+) -> tuple[set[str], list[str]]:
     names = _list_pack_input_filenames(src)
     if not names:
         return set(), []
-    roles = collect_pack_psm_roles_for_validation(names)
+    roles = collect_pack_psm_roles_for_validation(
+        names, allow_synthetic_s=allow_synthetic_s
+    )
     issues = collect_pack_sequence_issues(names)
     return roles, issues
 
@@ -997,6 +1003,23 @@ class PackTab(ttk.Frame):
             text="Diagnostic mode  (log warnings for unrecognized files)",
             variable=self._diagnostic,
         ).grid(row=3, column=0, columnspan=2, sticky="w", padx=4, pady=(6, 2))
+
+        self._allow_extra_files = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            opt_frame,
+            text="Allow extra files  (ignore unrecognized files instead of failing)",
+            variable=self._allow_extra_files,
+        ).grid(row=4, column=0, columnspan=2, sticky="w", padx=4, pady=2)
+
+        self._allow_synthetic_s = tk.BooleanVar(value=False)
+        self._allow_synthetic_s.trace_add(
+            "write", lambda *_: self._schedule_validation()
+        )
+        ttk.Checkbutton(
+            opt_frame,
+            text="Allow synthetic S  (zero-fill a missing s1; not playable)",
+            variable=self._allow_synthetic_s,
+        ).grid(row=5, column=0, columnspan=2, sticky="w", padx=4, pady=2)
         row += 1
 
         ctrl_row = ttk.Frame(self)
@@ -1069,6 +1092,8 @@ class PackTab(ttk.Frame):
         )
         swap_p = SwapMode(self._swap_p.get())  # "no" | "auto" | "yes"
         diagnostic = self._diagnostic.get()
+        allow_extra_files = self._allow_extra_files.get()
+        allow_synthetic_s = self._allow_synthetic_s.get()
         self._log.clear()
         self._wbridge.cancel_pump()
         self._wbridge.clear_queue()
@@ -1095,7 +1120,12 @@ class PackTab(ttk.Frame):
                     # Parse once, then apply_swap_p (single detect pass) and build.
                     with warnings.catch_warnings(record=True) as wprobe:
                         warnings.simplefilter("always")
-                        rs_probe = fn_parse(src, diagnostic=diagnostic)
+                        rs_probe = fn_parse(
+                            src,
+                            diagnostic=diagnostic,
+                            allow_extra_files=allow_extra_files,
+                            allow_synthetic_s=allow_synthetic_s,
+                        )
                     pack_warnings.extend(wprobe)
                     if self._cancel_event.is_set():
                         raise UserCancelledError("Operation cancelled by user.")
@@ -1122,6 +1152,8 @@ class PackTab(ttk.Frame):
                             swap_p=swap_p,
                             diagnostic=diagnostic,
                             swap_verbose=True,
+                            allow_extra_files=allow_extra_files,
+                            allow_synthetic_s=allow_synthetic_s,
                         )
                     pack_warnings.extend(caught)
 
@@ -1209,14 +1241,19 @@ class PackTab(ttk.Frame):
             self._set_status("error", str(e))
             return
 
-        src_key = self._source_key(src)
+        src_key = self._source_key(src) + (self._allow_synthetic_s.get(),)
         if src_key != self._roles_src_key:
             self._roles_src_key = src_key
             self._roles_missing = None
             self._roles_sequence_issues = None
             self._roles_scan_error = None
             self._roles_scan_token += 1
-            self._start_roles_scan(src, src_key, self._roles_scan_token)
+            self._start_roles_scan(
+                src,
+                src_key,
+                self._roles_scan_token,
+                allow_synthetic_s=self._allow_synthetic_s.get(),
+            )
             self._set_status("warn", "inspecting input roles...")
             return
 
@@ -1252,7 +1289,14 @@ class PackTab(ttk.Frame):
         st = src.stat()
         return (str(src.resolve()), src.is_dir(), st.st_mtime_ns, st.st_size)
 
-    def _start_roles_scan(self, src: Path, src_key: tuple, token: int) -> None:
+    def _start_roles_scan(
+        self,
+        src: Path,
+        src_key: tuple,
+        token: int,
+        *,
+        allow_synthetic_s: bool = False,
+    ) -> None:
         self._roles_scan_running_token = token
         self._wbridge.start_pump(
             lambda: self._is_running or self._roles_scan_running_token is not None
@@ -1263,7 +1307,9 @@ class PackTab(ttk.Frame):
             sequence_issues: list[str] = []
             error: str | None = None
             try:
-                roles, sequence_issues = _scan_pack_preflight(src)
+                roles, sequence_issues = _scan_pack_preflight(
+                    src, allow_synthetic_s=allow_synthetic_s
+                )
                 missing = [r for r in ("P", "S", "M") if r not in roles]
             except (OSError, ValueError) as e:
                 error = str(e)

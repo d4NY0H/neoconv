@@ -25,6 +25,18 @@ def _mini_zip_bytes() -> bytes:
     return buf.getvalue()
 
 
+def _write_complete_dir(root: Path, *, include_s: bool = True) -> None:
+    """Small complete P/S/M/V/C set; optional s1 omission for synthetic-S tests."""
+    root.mkdir(exist_ok=True)
+    (root / "game-p1.bin").write_bytes(b"p" * 1024)
+    if include_s:
+        (root / "game-s1.bin").write_bytes(b"s" * 1024)
+    (root / "game-m1.bin").write_bytes(b"m" * 1024)
+    (root / "game-v1.bin").write_bytes(b"v" * 1024)
+    (root / "game-c1.bin").write_bytes(b"\x11" * (512 * 1024))
+    (root / "game-c2.bin").write_bytes(b"\x22" * (512 * 1024))
+
+
 class _FakeRomset:
     def __init__(self, p: bytes = b"\x00" * 1024):
         self.p = p
@@ -41,12 +53,14 @@ def _pack_namespace(src: Path, out: Path, **over) -> argparse.Namespace:
         "name": "N",
         "manufacturer": "M",
         "year": 1994,
-        "genre": "Other",
+        "genre": 0,
         "ngh": 1,
         "screenshot": 0,
         "swap_p": "auto",
         "diagnostic": False,
         "v2_size": None,
+        "allow_extra_files": False,
+        "allow_synthetic_s": False,
     }
     base.update(over)
     return argparse.Namespace(**base)
@@ -438,9 +452,11 @@ def test_cmd_pack_swap_no_branch(monkeypatch, tmp_path):
     (roms / "f.bin").write_bytes(b"y")
     captured: dict[str, object] = {}
 
-    def _capture(_src, _meta, swap_p=None, diagnostic=False, v2_size=None):
+    def _capture(_src, _meta, swap_p=None, diagnostic=False, v2_size=None, **_kw):
         captured["swap_p"] = swap_p
         captured["diagnostic"] = diagnostic
+        captured["allow_extra_files"] = _kw.get("allow_extra_files")
+        captured["allow_synthetic_s"] = _kw.get("allow_synthetic_s")
         return b"neo"
 
     monkeypatch.setattr(cli, "mame_dir_to_neo", _capture)
@@ -473,6 +489,127 @@ def test_cmd_pack_unknown_genre_exits(monkeypatch, tmp_path):
         cli._genre_type("__bad_genre__")
 
 
+def test_pack_parser_new_opt_in_flags_default_off():
+    parser = cli.build_parser()
+    args = parser.parse_args(["pack", "input.zip"])
+    assert args.allow_extra_files is False
+    assert args.allow_synthetic_s is False
+
+    args = parser.parse_args([
+        "pack", "input.zip", "--allow-extra-files", "--allow-synthetic-s",
+    ])
+    assert args.allow_extra_files is True
+    assert args.allow_synthetic_s is True
+
+
+def test_cmd_pack_passes_allow_flags(monkeypatch, tmp_path):
+    roms = tmp_path / "roms"
+    roms.mkdir()
+    (roms / "f.bin").write_bytes(b"y")
+    captured: dict[str, object] = {}
+
+    def _capture(_src, _meta, **_kw):
+        captured.update(_kw)
+        return b"neo"
+
+    monkeypatch.setattr(cli, "mame_dir_to_neo", _capture)
+    monkeypatch.setattr(cli, "_print_neo_info", lambda *_: None)
+    cli.cmd_pack(_pack_namespace(
+        roms,
+        tmp_path / "o.neo",
+        swap_p="no",
+        allow_extra_files=True,
+        allow_synthetic_s=True,
+    ))
+    assert captured["allow_extra_files"] is True
+    assert captured["allow_synthetic_s"] is True
+
+
+def _run_pack_cli(monkeypatch, src: Path, out: Path, *extra: str) -> int:
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        ["neoconv", "pack", str(src), "-o", str(out), "--swap-p", "no", *extra],
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    return int(exc.value.code)
+
+
+def test_pack_extra_file_failure_leaves_no_output(monkeypatch, tmp_path, capsys):
+    roms = tmp_path / "roms"
+    _write_complete_dir(roms)
+    (roms / "readme.txt").write_text("x", encoding="utf-8")
+    out = tmp_path / "out.neo"
+
+    code = _run_pack_cli(monkeypatch, roms, out)
+
+    assert code == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "readme.txt" in err
+    assert "--allow-extra-files" in err
+
+
+def test_pack_allow_extra_files_writes_output(monkeypatch, tmp_path):
+    roms = tmp_path / "roms"
+    _write_complete_dir(roms)
+    (roms / "readme.txt").write_text("x", encoding="utf-8")
+    out = tmp_path / "out.neo"
+
+    monkeypatch.setattr(cli, "_print_neo_info", lambda *_: None)
+    with pytest.warns(UserWarning, match="Ignoring"):
+        cli.cmd_pack(_pack_namespace(
+            roms, out, swap_p="no", allow_extra_files=True,
+        ))
+
+    assert out.exists()
+
+
+def test_pack_missing_s_fails_leaves_no_output(monkeypatch, tmp_path, capsys):
+    roms = tmp_path / "roms"
+    _write_complete_dir(roms, include_s=False)
+    out = tmp_path / "out.neo"
+
+    code = _run_pack_cli(monkeypatch, roms, out)
+
+    assert code == 1
+    assert not out.exists()
+    assert "--allow-synthetic-s" in capsys.readouterr().err
+
+
+def test_pack_allow_synthetic_s_writes_output(monkeypatch, tmp_path, capsys):
+    roms = tmp_path / "roms"
+    _write_complete_dir(roms, include_s=False)
+    out = tmp_path / "out.neo"
+
+    monkeypatch.setattr(cli, "_print_neo_info", lambda *_: None)
+    with pytest.warns(UserWarning, match="No text-layer ROM"):
+        cli.cmd_pack(_pack_namespace(
+            roms, out, swap_p="no", allow_synthetic_s=True,
+        ))
+
+    assert out.exists()
+
+
+@pytest.mark.parametrize("set_name", ["mslug5", "kof2003", "kotm2p"])
+def test_pack_unsupported_set_failure_leaves_no_output(
+    monkeypatch, tmp_path, capsys, set_name
+):
+    src = tmp_path / set_name
+    src.mkdir()
+    (src / "junk.bin").write_bytes(b"x")
+    out = tmp_path / "out.neo"
+
+    code = _run_pack_cli(monkeypatch, src, out)
+
+    assert code == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "not supported" in err
+    assert "layout/decrypt" in err
+
+
 def _patch_pack_romset(monkeypatch, v: bytes = b"V" * 100) -> None:
     from neoconv.core import RomSet
 
@@ -485,7 +622,7 @@ def _patch_pack_romset(monkeypatch, v: bytes = b"V" * 100) -> None:
     )
     monkeypatch.setattr(
         "neoconv.core.pack.parse_mame_dir",
-        lambda _p, diagnostic=False: romset,
+        lambda _p, diagnostic=False, **_kw: romset,
     )
 
 
@@ -555,7 +692,7 @@ def test_cli_pack_negative_v2_size_fails_cleanly(monkeypatch, tmp_path, capsys):
 def test_cmd_detect_swap_from_zip(monkeypatch, tmp_path, capsys):
     zpath = tmp_path / "set.zip"
     zpath.write_bytes(_mini_zip_bytes())
-    monkeypatch.setattr(cli, "parse_mame_zip", lambda _p: _FakeRomset())
+    monkeypatch.setattr(cli, "parse_mame_zip", lambda _p, **_kw: _FakeRomset())
     monkeypatch.setattr(cli, "detect_swap_p_needed", lambda _p: (False, "ok heuristic"))
     cli.cmd_detect_swap(argparse.Namespace(input=str(zpath)))
     out = capsys.readouterr().out

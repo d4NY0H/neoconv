@@ -60,6 +60,31 @@ def test_scan_pack_preflight_detects_v_gap(tmp_path):
     assert any("V2" in i for i in issues)
 
 
+def test_scan_pack_preflight_synthetic_s_is_off_by_default(tmp_path):
+    (tmp_path / "269-p1.p1").write_bytes(b"p")
+    (tmp_path / "269-m1.m1").write_bytes(b"m")
+    (tmp_path / "269-v1.v1").write_bytes(b"v")
+    (tmp_path / "269-c1r.c1").write_bytes(b"c")
+    (tmp_path / "269-c2r.c2").write_bytes(b"c")
+
+    roles, _ = gui._scan_pack_preflight(tmp_path)
+    assert "S" not in roles
+
+    roles, _ = gui._scan_pack_preflight(tmp_path, allow_synthetic_s=True)
+    assert "S" in roles
+
+
+def test_pack_tab_opt_in_flags_default_off():
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        tab = gui.PackTab(root)
+        assert tab._allow_extra_files.get() is False
+        assert tab._allow_synthetic_s.get() is False
+    finally:
+        root.destroy()
+
+
 def test_c_chip_size_from_str_default_label():
     from neoconv.core import C_CHIP_SIZE_DEFAULT
 

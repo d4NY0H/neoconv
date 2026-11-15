@@ -253,6 +253,8 @@ def cmd_pack(args: argparse.Namespace) -> None:
             swap_p=swap_p,
             diagnostic=args.diagnostic,
             v2_size=getattr(args, "v2_size", None),
+            allow_extra_files=args.allow_extra_files,
+            allow_synthetic_s=args.allow_synthetic_s,
         )
     elif zipfile.is_zipfile(src):
         print(f"Packing ZIP: {src}")
@@ -262,6 +264,8 @@ def cmd_pack(args: argparse.Namespace) -> None:
             swap_p=swap_p,
             diagnostic=args.diagnostic,
             v2_size=getattr(args, "v2_size", None),
+            allow_extra_files=args.allow_extra_files,
+            allow_synthetic_s=args.allow_synthetic_s,
         )
     else:
         print(f"Error: input must be a directory or ZIP file.", file=sys.stderr)
@@ -285,7 +289,12 @@ def cmd_detect_swap(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if _zf.is_zipfile(src):
-        romset = parse_mame_zip(src)
+        # detect-swap only needs the P-ROM. Allow extra files / synthetic S so
+        # this inspection command keeps working on sets that would fail a
+        # strict pack; missing mandatory ROMs still raise.
+        romset = parse_mame_zip(
+            src, allow_extra_files=True, allow_synthetic_s=True
+        )
         p_rom = romset.p
         print(f"Inspecting P-ROM from ZIP: {src}  ({len(p_rom):,} bytes)")
     else:
@@ -468,6 +477,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_pack.add_argument(
         "--diagnostic", action="store_true", default=False,
         help="Print a warning for every file that was not recognized, to help diagnose naming issues."
+    )
+    p_pack.add_argument(
+        "--allow-extra-files",
+        action="store_true",
+        default=False,
+        help=(
+            "Ignore unrecognized files in the input set instead of failing. "
+            "By default they are rejected because dropping them can truncate "
+            "P/V/C data. Use only when you know the extra files are harmless."
+        ),
+    )
+    p_pack.add_argument(
+        "--allow-synthetic-s",
+        action="store_true",
+        default=False,
+        help=(
+            "Allow a missing s1 (text-layer) ROM to be replaced with a "
+            "zero-filled placeholder. The resulting .neo is NOT playable on "
+            "hardware; by default a missing S ROM is an error."
+        ),
     )
     p_pack.add_argument(
         "--v2-size",

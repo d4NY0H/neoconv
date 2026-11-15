@@ -25,6 +25,8 @@ from neoconv.core import (
     RomSet,
     SwapMode,
     P_SWAP_SIZE,
+    UNSUPPORTED_MAME_SETS,
+    UnsupportedRomSetError,
     UserCancelledError,
     apply_swap_p,
     check_m68k_vectors,
@@ -83,6 +85,31 @@ def make_neo(romset: RomSet, meta: NeoMeta | None = None) -> bytes:
     if meta is None:
         meta = NeoMeta(name="Test", manufacturer="SNK", year=1994, ngh=42)
     return build_neo(romset, meta)
+
+
+def write_complete_mame_zip(
+    path: Path,
+    *,
+    prefix: str = "game",
+    extra: tuple[tuple[str, bytes], ...] = (),
+) -> None:
+    """Write a small but complete (P/S/M/V/C) MAME-style ZIP fixture."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as zf:
+        zf.writestr(f"{prefix}-p1.bin", make_rom(64 * 1024))
+        zf.writestr(f"{prefix}-s1.bin", make_rom(128 * 1024))
+        zf.writestr(f"{prefix}-m1.bin", make_rom(128 * 1024))
+        zf.writestr(f"{prefix}-v1.bin", make_rom(128 * 1024))
+        zf.writestr(f"{prefix}-c1.bin", make_rom(C_BANK_SIZE))
+        zf.writestr(f"{prefix}-c2.bin", make_rom(C_BANK_SIZE))
+        for name, data in extra:
+            zf.writestr(name, data)
+
+
+def write_role_zip(path: Path, roles: list[tuple[str, bytes]]) -> None:
+    """Write a ZIP from explicit ``(member_name, data)`` pairs."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as zf:
+        for name, data in roles:
+            zf.writestr(name, data)
 
 
 def make_neo_with_v2_split(
@@ -786,9 +813,12 @@ class TestCoreEdgeCases:
             zf.writestr("game-p1.bin", b"p" * 4096)
             zf.writestr("game-s1.bin", make_rom(128 * 1024, 0x11))
             zf.writestr("game-m1.bin", make_rom(128 * 1024, 0x22))
+            zf.writestr("game-v1.bin", make_rom(128 * 1024, 0x33))
+            zf.writestr("game-c1.bin", make_rom(C_BANK_SIZE, 0x44))
+            zf.writestr("game-c2.bin", make_rom(C_BANK_SIZE, 0x55))
             zf.writestr("readme.txt", b"x")
         with pytest.warns(UserWarning, match=r"\[diagnostic\]"):
-            parse_mame_zip(z, diagnostic=True)
+            parse_mame_zip(z, diagnostic=True, allow_extra_files=True)
 
     def test_parse_mame_zip_svc_parent_style_inserts_512k_zero_s(self, tmp_path):
         """MAME parent ``svc`` has no s1; fixed layer is 512 KiB of zeros (PVC / c1r)."""
@@ -802,7 +832,7 @@ class TestCoreEdgeCases:
             zf.writestr("269-c1r.c1", chip)
             zf.writestr("269-c2r.c2", make_rom(C_BANK_SIZE, 0x22))
         with pytest.warns(UserWarning, match="No text-layer ROM") as caught:
-            rs = parse_mame_zip(z)
+            rs = parse_mame_zip(z, allow_synthetic_s=True)
         assert len(rs.s) == 0x80000
         assert rs.s == b"\x00" * 0x80000
         assert any("NOT playable" in str(w.message) for w in caught)
@@ -819,7 +849,7 @@ class TestCoreEdgeCases:
             zf.writestr("253-c1.c1", chip)
             zf.writestr("253-c2.c2", make_rom(C_BANK_SIZE, 0x22))
         with pytest.warns(UserWarning, match="No text-layer ROM"):
-            rs = parse_mame_zip(z)
+            rs = parse_mame_zip(z, allow_synthetic_s=True)
         assert len(rs.s) == 0x80000
 
     def test_parse_mame_zip_kof2003_style_c1c_suffix_512k_s(self, tmp_path):
@@ -833,7 +863,7 @@ class TestCoreEdgeCases:
             zf.writestr("271-c1c.c1", chip)
             zf.writestr("271-c2c.c2", make_rom(C_BANK_SIZE, 0x22))
         with pytest.warns(UserWarning, match="No text-layer ROM"):
-            rs = parse_mame_zip(z)
+            rs = parse_mame_zip(z, allow_synthetic_s=True)
         assert len(rs.s) == 0x80000
 
     def test_parse_mame_zip_kof10th_style_256k_zero_s(self, tmp_path):
@@ -846,7 +876,7 @@ class TestCoreEdgeCases:
             zf.writestr("kf10-c1a.bin", chip)
             zf.writestr("kf10-c2a.bin", make_rom(C_BANK_SIZE // 2, 0x22))
         with pytest.warns(UserWarning, match="No text-layer ROM"):
-            rs = parse_mame_zip(z)
+            rs = parse_mame_zip(z, allow_synthetic_s=True)
         assert len(rs.s) == 0x40000
         assert len(rs.c) == C_BANK_SIZE  # interleaved pair of half-size chips
 
@@ -867,7 +897,7 @@ class TestCoreEdgeCases:
             zf.writestr("kf10-c2a.bin", c2a)
             zf.writestr("kf10-c2b.bin", c2b)
         with pytest.warns(UserWarning, match="No text-layer ROM"):
-            rs = parse_mame_zip(z)
+            rs = parse_mame_zip(z, allow_synthetic_s=True)
         assert len(rs.s) == 0x40000
         assert rs.c == interleave_c_chips([c1a + c1b, c2a + c2b])
 
@@ -885,6 +915,7 @@ class TestCoreEdgeCases:
                         "kf10-m1.bin",
                         "kf10-c1a.bin",  # implies C1 / synthetic S, but no C bytes stored
                     ),
+                    allow_synthetic_s=True,
                 )
 
     def test_parse_mame_zip_encrypted_without_c1r_inserts_128k_zero_s(self, tmp_path):
@@ -898,7 +929,7 @@ class TestCoreEdgeCases:
             zf.writestr("270-c1.c1", chip)
             zf.writestr("270-c2.c2", make_rom(C_BANK_SIZE, 0x22))
         with pytest.warns(UserWarning, match="No text-layer ROM"):
-            rs = parse_mame_zip(z)
+            rs = parse_mame_zip(z, allow_synthetic_s=True)
         assert len(rs.s) == 0x20000
         assert rs.s == b"\x00" * 0x20000
 
@@ -915,7 +946,9 @@ class TestCoreEdgeCases:
             zf.writestr("270-c2.c2", make_rom(C_BANK_SIZE, 0x22))
             zf.writestr("game-c1r2.bin", b"readme")
         with pytest.warns(UserWarning, match="No text-layer ROM"):
-            rs = parse_mame_zip(z)
+            rs = parse_mame_zip(
+                z, allow_extra_files=True, allow_synthetic_s=True
+            )
         assert len(rs.s) == 0x20000
 
     def testroles_to_romset_without_filenames_still_requires_physical_s(self):
@@ -939,16 +972,19 @@ class TestCoreEdgeCases:
         (tmp_path / "269-c1r.c1").write_bytes(chip)
         (tmp_path / "269-c2r.c2").write_bytes(make_rom(C_BANK_SIZE, 0x22))
         with pytest.warns(UserWarning, match="No text-layer ROM"):
-            rs = parse_mame_dir(tmp_path)
+            rs = parse_mame_dir(tmp_path, allow_synthetic_s=True)
         assert len(rs.s) == 0x80000
 
     def test_parse_mame_dir_diagnostic_warns_on_unknown_files(self, tmp_path):
         (tmp_path / "game-p1.bin").write_bytes(b"p" * 4096)
         (tmp_path / "game-s1.bin").write_bytes(make_rom(128 * 1024))
         (tmp_path / "game-m1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-v1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-c1.bin").write_bytes(make_rom(C_BANK_SIZE))
+        (tmp_path / "game-c2.bin").write_bytes(make_rom(C_BANK_SIZE))
         (tmp_path / "readme.txt").write_text("x", encoding="utf-8")
         with pytest.warns(UserWarning, match=r"\[diagnostic\]"):
-            parse_mame_dir(tmp_path, diagnostic=True)
+            parse_mame_dir(tmp_path, diagnostic=True, allow_extra_files=True)
 
     def test_parse_mame_dir_reads_one_subdirectory_level(self, tmp_path):
         sub = tmp_path / "set"
@@ -956,6 +992,9 @@ class TestCoreEdgeCases:
         (sub / "game-p1.bin").write_bytes(make_rom(512 * 1024))
         (sub / "game-s1.bin").write_bytes(make_rom(128 * 1024))
         (sub / "game-m1.bin").write_bytes(make_rom(128 * 1024))
+        (sub / "game-v1.bin").write_bytes(make_rom(128 * 1024))
+        (sub / "game-c1.bin").write_bytes(make_rom(C_BANK_SIZE))
+        (sub / "game-c2.bin").write_bytes(make_rom(C_BANK_SIZE))
         rs = parse_mame_dir(tmp_path)
         assert len(rs.p) == 512 * 1024
 
@@ -1247,9 +1286,7 @@ class TestDiagnosticMode:
     def test_missing_mandatory_rom_error_has_quick_tips(self, tmp_path):
         from neoconv.core import parse_mame_dir
 
-        # Intentionally omit p1/s1/m1 to verify actionable error text.
-        (tmp_path / "readme.txt").write_bytes(b"hello")
-
+        # Empty input: verify the actionable missing-role error text.
         with pytest.raises(InvalidRomLayoutError) as exc:
             parse_mame_dir(tmp_path, diagnostic=False)
 
@@ -1269,12 +1306,15 @@ class TestDiagnosticMode:
         (tmp_path / "game-p1.bin").write_bytes(make_rom(512 * 1024))
         (tmp_path / "game-s1.bin").write_bytes(make_rom(128 * 1024))
         (tmp_path / "game-m1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-v1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-c1.bin").write_bytes(make_rom(C_BANK_SIZE))
+        (tmp_path / "game-c2.bin").write_bytes(make_rom(C_BANK_SIZE))
         (tmp_path / "readme.txt").write_bytes(b"hello")       # unrecognized
         (tmp_path / "000-lo.lo").write_bytes(make_rom(128 * 1024))  # unrecognized
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            parse_mame_dir(tmp_path, diagnostic=True)
+            parse_mame_dir(tmp_path, diagnostic=True, allow_extra_files=True)
 
         warned_names = [str(w.message) for w in caught]
         # Both unrecognized files should produce warnings
@@ -1288,11 +1328,15 @@ class TestDiagnosticMode:
         (tmp_path / "game-p1.bin").write_bytes(make_rom(512 * 1024))
         (tmp_path / "game-s1.bin").write_bytes(make_rom(128 * 1024))
         (tmp_path / "game-m1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-v1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-c1.bin").write_bytes(make_rom(C_BANK_SIZE))
+        (tmp_path / "game-c2.bin").write_bytes(make_rom(C_BANK_SIZE))
         (tmp_path / "readme.txt").write_bytes(b"hello")
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            parse_mame_dir(tmp_path, diagnostic=False)
+            with pytest.raises(InvalidRomLayoutError, match="Unrecognized file"):
+                parse_mame_dir(tmp_path, diagnostic=False)
 
         assert len(caught) == 0
 
@@ -1320,6 +1364,248 @@ class TestDiagnosticMode:
 
         with pytest.raises(InvalidRomLayoutError, match="Duplicate ROM role"):
             parse_mame_zip(zip_path, diagnostic=False)
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed pack gates (1.5.2)
+# ---------------------------------------------------------------------------
+
+class TestUnsupportedSets:
+    def test_list_matches_mame_xml_union(self):
+        assert len(UNSUPPORTED_MAME_SETS) == 67
+        assert UNSUPPORTED_MAME_SETS["mslug5"] == "encrypted-rom"
+        assert UNSUPPORTED_MAME_SETS["kof98"] == "protected-rom"
+        assert UNSUPPORTED_MAME_SETS["kotm2p"] == "c-part-layout"
+        assert UNSUPPORTED_MAME_SETS["kf2k2mp"] == "audiocrypt"
+        assert not any(name.startswith("boot_") for name in UNSUPPORTED_MAME_SETS)
+
+    @pytest.mark.parametrize(
+        "name", ["mslug5", "kof2003", "kotm2p", "viewpoinp", "stakwindev"]
+    )
+    def test_blocked_zip_fails_before_reading_members(self, tmp_path, name):
+        z = tmp_path / f"{name}.zip"
+        z.write_bytes(b"not a zip")  # gate must run before ZIP parsing
+        with pytest.raises(UnsupportedRomSetError) as exc:
+            parse_mame_zip(z)
+        assert exc.value.code == "unsupported_rom_set"
+        assert name in str(exc.value)
+        assert "layout/decrypt" in (exc.value.hint or "")
+
+    def test_blocked_zip_name_is_case_insensitive(self, tmp_path):
+        z = tmp_path / "MSLUG5.zip"
+        z.write_bytes(b"not a zip")
+        with pytest.raises(UnsupportedRomSetError, match="MSLUG5"):
+            parse_mame_zip(z)
+
+    def test_blocked_directory_basename(self, tmp_path):
+        d = tmp_path / "kotm2p"
+        d.mkdir()
+        with pytest.raises(UnsupportedRomSetError, match="kotm2p"):
+            parse_mame_dir(d)
+
+    def test_boot_legacy_names_are_not_blocked(self, tmp_path):
+        d = tmp_path / "boot_mslug5"
+        d.mkdir()
+        with pytest.raises(InvalidRomLayoutError, match="Missing mandatory"):
+            parse_mame_dir(d)
+
+
+class TestFailClosedPack:
+    def test_samsho_extra_pg2_fails_instead_of_truncating_p(self, tmp_path):
+        z = tmp_path / "samsho_fixture.zip"
+        write_role_zip(z, [
+            ("045-p1.p1", make_rom(1024, 1)),
+            ("045-pg2.sp2", make_rom(1024, 2)),
+            ("045-s1.s1", make_rom(1024, 3)),
+            ("045-m1.m1", make_rom(1024, 4)),
+            ("045-v1.v1", make_rom(1024, 5)),
+            ("045-c1.c1", make_rom(C_BANK_SIZE, 0x11)),
+            ("045-c2.c2", make_rom(C_BANK_SIZE, 0x22)),
+        ])
+        with pytest.raises(InvalidRomLayoutError) as exc:
+            parse_mame_zip(z)
+        assert "045-pg2.sp2" in str(exc.value)
+        assert "--allow-extra-files" in (exc.value.hint or "")
+
+    def test_aof2a_extra_epr_fails(self, tmp_path):
+        z = tmp_path / "aof2a_fixture.zip"
+        write_role_zip(z, [
+            ("056-p1.p1", make_rom(1024, 1)),
+            ("056-epr.ep1", make_rom(1024, 2)),
+            ("056-s1.s1", make_rom(1024, 3)),
+            ("056-m1.m1", make_rom(1024, 4)),
+            ("056-v1.v1", make_rom(1024, 5)),
+            ("056-c1.c1", make_rom(C_BANK_SIZE, 0x11)),
+            ("056-c2.c2", make_rom(C_BANK_SIZE, 0x22)),
+        ])
+        with pytest.raises(InvalidRomLayoutError) as exc:
+            parse_mame_zip(z)
+        assert "056-epr.ep1" in str(exc.value)
+
+    def test_kof99_extra_neo_sma_fails(self, tmp_path):
+        z = tmp_path / "kof99_fixture.zip"
+        write_role_zip(z, [
+            ("251-p1.p1", make_rom(1024, 1)),
+            ("251-p2.p2", make_rom(1024, 2)),
+            ("251-s1.s1", make_rom(1024, 3)),
+            ("251-m1.m1", make_rom(1024, 4)),
+            ("251-v1.v1", make_rom(1024, 5)),
+            ("251-c1.c1", make_rom(C_BANK_SIZE, 0x11)),
+            ("251-c2.c2", make_rom(C_BANK_SIZE, 0x22)),
+            ("ka.neo-sma", make_rom(1024, 6)),
+        ])
+        with pytest.raises(InvalidRomLayoutError) as exc:
+            parse_mame_zip(z)
+        assert "ka.neo-sma" in str(exc.value)
+
+    def test_nblktiger_v9_extra_fails(self, tmp_path):
+        z = tmp_path / "nblktiger_fixture.zip"
+        roles = [
+            ("202-p1.bin", make_rom(1024, 1)),
+            ("202-s1.bin", make_rom(1024, 2)),
+            ("202-m1.bin", make_rom(1024, 3)),
+        ]
+        roles += [(f"202-v{i}.bin", make_rom(1024, i)) for i in range(1, 10)]
+        roles += [
+            (f"202-c{i}.bin", make_rom(C_BANK_SIZE, 0x10 + i))
+            for i in range(1, 9)
+        ]
+        write_role_zip(z, roles)
+        with pytest.raises(InvalidRomLayoutError) as exc:
+            parse_mame_zip(z)
+        assert "202-v9.bin" in str(exc.value)
+
+    def test_viewpoinp_bare_names_fail(self, tmp_path):
+        z = tmp_path / "viewpoint_proto_fixture.zip"
+        roles = [("p1", b"p"), ("p2", b"p"), ("s1", b"s"), ("m1", b"m")]
+        roles += [(f"v{i}", b"v") for i in range(1, 5)]
+        roles += [
+            (f"c{i}", make_rom(C_BANK_SIZE, i)) for i in range(1, 9)
+        ]
+        write_role_zip(z, roles)
+        with pytest.raises(InvalidRomLayoutError, match="Unrecognized file"):
+            parse_mame_zip(z)
+
+    def test_stakwindev_bare_sp_names_fail(self, tmp_path):
+        z = tmp_path / "stakwindev_fixture.zip"
+        roles = [("sp1.sp1", b"p"), ("sp2.sp2", b"p")]
+        roles += [("s1.s1", b"s"), ("m1.m1", b"m")]
+        roles += [(f"v{i}.v{i}", b"v") for i in range(1, 4)]
+        roles += [
+            (f"c{i}.c{i}", make_rom(C_BANK_SIZE, i)) for i in range(1, 13)
+        ]
+        write_role_zip(z, roles)
+        with pytest.raises(InvalidRomLayoutError) as exc:
+            parse_mame_zip(z)
+        assert "sp1.sp1" in str(exc.value)
+
+    def test_extra_file_fails_by_default(self, tmp_path):
+        z = tmp_path / "set.zip"
+        write_complete_mame_zip(z, extra=(("readme.txt", b"x"),))
+        with pytest.raises(InvalidRomLayoutError) as exc:
+            parse_mame_zip(z)
+        assert "readme.txt" in str(exc.value)
+        assert "--allow-extra-files" in (exc.value.hint or "")
+
+    def test_roles_to_romset_rejects_extra_source_filename(self):
+        with pytest.raises(InvalidRomLayoutError, match="readme.txt"):
+            roles_to_romset(
+                {
+                    "P": make_rom(64 * 1024),
+                    "S": make_rom(1024),
+                    "M": make_rom(1024),
+                    "V1": make_rom(1024),
+                    "C1": make_rom(C_BANK_SIZE, 0x11),
+                    "C2": make_rom(C_BANK_SIZE, 0x22),
+                },
+                source_filenames=("game-p1.bin", "readme.txt"),
+            )
+
+    def test_diagnostic_does_not_override_extra_file_failure(self, tmp_path):
+        z = tmp_path / "set.zip"
+        write_complete_mame_zip(z, extra=(("readme.txt", b"x"),))
+        with pytest.warns(UserWarning, match=r"\[diagnostic\]"):
+            with pytest.raises(InvalidRomLayoutError, match="Unrecognized file"):
+                parse_mame_zip(z, diagnostic=True)
+
+    def test_allow_extra_files_succeeds_with_warning(self, tmp_path):
+        z = tmp_path / "set.zip"
+        write_complete_mame_zip(z, extra=(("readme.txt", b"x"),))
+        with pytest.warns(UserWarning, match="Ignoring"):
+            rs = parse_mame_zip(z, allow_extra_files=True)
+        assert len(rs.p) == 64 * 1024
+        assert len(rs.v) == 128 * 1024
+        assert len(rs.c) == 2 * C_BANK_SIZE
+
+    def test_extra_file_error_caps_long_list(self, tmp_path):
+        extras = tuple((f"junk{i}.bin", b"x") for i in range(20))
+        z = tmp_path / "set.zip"
+        write_complete_mame_zip(z, extra=extras)
+        with pytest.raises(InvalidRomLayoutError) as exc:
+            parse_mame_zip(z)
+        msg = str(exc.value)
+        assert "(20 files)" in msg
+        assert "+8 more" in msg
+
+    def test_empty_v_region_rejected(self):
+        with pytest.raises(InvalidRomLayoutError, match=r"No V \(audio\) ROM"):
+            roles_to_romset({
+                "P": make_rom(64 * 1024),
+                "S": make_rom(1024),
+                "M": make_rom(1024),
+                "C1": make_rom(C_BANK_SIZE, 0x11),
+                "C2": make_rom(C_BANK_SIZE, 0x22),
+            })
+
+    def test_empty_c_region_rejected(self):
+        with pytest.raises(InvalidRomLayoutError, match=r"No C \(sprite\) ROM"):
+            roles_to_romset({
+                "P": make_rom(64 * 1024),
+                "S": make_rom(1024),
+                "M": make_rom(1024),
+                "V1": make_rom(1024),
+            })
+
+    @pytest.mark.parametrize("role", ["P", "S", "M"])
+    def test_empty_required_role_rejected(self, role):
+        roles = {
+            "P": make_rom(64 * 1024),
+            "S": make_rom(1024),
+            "M": make_rom(1024),
+            "V1": make_rom(1024),
+            "C1": make_rom(C_BANK_SIZE, 0x11),
+            "C2": make_rom(C_BANK_SIZE, 0x22),
+        }
+        roles[role] = b""
+        with pytest.raises(InvalidRomLayoutError, match="Missing mandatory"):
+            roles_to_romset(roles)
+
+    def _write_unsynthesized_zip(self, tmp_path: Path) -> Path:
+        z = tmp_path / "svc_fixture.zip"
+        write_role_zip(z, [
+            ("269-p1.p1", make_rom(1024, 1)),
+            ("269-p2.p2", make_rom(1024, 2)),
+            ("269-m1.m1", make_rom(1024, 3)),
+            ("269-v1.v1", make_rom(1024, 4)),
+            ("269-c1r.c1", make_rom(C_BANK_SIZE, 0x11)),
+            ("269-c2r.c2", make_rom(C_BANK_SIZE, 0x22)),
+        ])
+        return z
+
+    def test_synthetic_s_is_off_by_default(self, tmp_path):
+        z = self._write_unsynthesized_zip(tmp_path)
+        with pytest.raises(InvalidRomLayoutError) as exc:
+            parse_mame_zip(z)
+        assert "Missing mandatory ROM(s)" in str(exc.value)
+        assert "S" in str(exc.value)
+        assert "--allow-synthetic-s" in (exc.value.hint or "")
+
+    def test_allow_synthetic_s_still_warns_not_playable(self, tmp_path):
+        z = self._write_unsynthesized_zip(tmp_path)
+        with pytest.warns(UserWarning, match="No text-layer ROM") as caught:
+            rs = parse_mame_zip(z, allow_synthetic_s=True)
+        assert rs.s == b"\x00" * 0x80000
+        assert any("NOT playable" in str(w.message) for w in caught)
 
 
 # ---------------------------------------------------------------------------
@@ -1544,8 +1830,8 @@ class TestEndToEndRoundtrip:
         result = verify_roundtrip(original_neo, rebuilt_neo)
         assert result.ok, f"Multi V/C roundtrip failed: {result.details}"
 
-    def test_roundtrip_no_v_no_c(self, tmp_path):
-        """Edge case: ROM set with no V and no C data (e.g. puzzle/mahjong titles)."""
+    def test_parse_rejects_no_v_no_c(self, tmp_path):
+        """A .neo with empty V/C can still exist, but re-packing must fail."""
         meta = self._make_meta()
         romset = RomSet(
             p=make_rom(512 * 1024, 0xAA),
@@ -1560,11 +1846,8 @@ class TestEndToEndRoundtrip:
         zip_path = tmp_path / "rtrip_novc.zip"
         zip_path.write_bytes(zip_bytes)
 
-        reparsed = parse_mame_zip(zip_path)
-        rebuilt_neo = build_neo(reparsed, meta)
-
-        result = verify_roundtrip(original_neo, rebuilt_neo)
-        assert result.ok, f"No-V/C roundtrip failed: {result.details}"
+        with pytest.raises(InvalidRomLayoutError, match="No V \\(audio\\) ROM"):
+            parse_mame_zip(zip_path)
 
     def test_swap_p_roundtrip(self, tmp_path):
         """Swapping P-ROM and then re-swapping must reproduce the original."""

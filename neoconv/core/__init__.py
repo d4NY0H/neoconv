@@ -80,6 +80,7 @@ from .exceptions import (
     InvalidNeoError,
     InvalidRomLayoutError,
     NeoConvError,
+    UnsupportedRomSetError,
     UserCancelledError,
 )
 from .models import NeoMeta, RomSet, SwapMode
@@ -92,6 +93,7 @@ from .neo_format import (
 )
 from .pack import apply_swap_p, mame_dir_to_neo, mame_zip_to_neo
 from .swap_detect import check_m68k_vectors, detect_swap_p_needed, swap_p_banks
+from .unsupported import UNSUPPORTED_MAME_SETS, unsupported_set_reason
 from .verify import VerifyResult, verify_roundtrip
 
 __all__ = [
@@ -111,6 +113,8 @@ __all__ = [
     "NeoMeta",
     "RomSet",
     "SwapMode",
+    "UNSUPPORTED_MAME_SETS",
+    "UnsupportedRomSetError",
     "UserCancelledError",
     "VerifyResult",
     "apply_swap_p",
@@ -140,6 +144,7 @@ __all__ = [
     "replace_neo_metadata",
     "roles_to_romset",
     "swap_p_banks",
+    "unsupported_set_reason",
     "verify_roundtrip",
     "write_bytes_atomic",
 ]

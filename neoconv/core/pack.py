@@ -108,6 +108,9 @@ def mame_zip_to_neo(
     diagnostic: bool = False,
     swap_verbose: bool = True,
     v2_size: int | None = None,
+    *,
+    allow_extra_files: bool = False,
+    allow_synthetic_s: bool = False,
 ) -> bytes:
     """Convert a MAME ROM zip to a .neo binary.
 
@@ -122,8 +125,19 @@ def mame_zip_to_neo(
     v2_size
         Optional ADPCM-B (V2) byte count for the ``.neo`` header. When ``None``
         all V data is written to V1 (legacy layout). Must not exceed total V.
+    allow_extra_files
+        If True, unrecognized input files are ignored with a warning instead
+        of raising :class:`InvalidRomLayoutError`.
+    allow_synthetic_s
+        If True, a missing s1 ROM may be replaced with a zero-filled
+        placeholder. The result is not hardware-playable.
     """
-    romset = parse_mame_zip(zip_path, diagnostic=diagnostic)
+    romset = parse_mame_zip(
+        zip_path,
+        diagnostic=diagnostic,
+        allow_extra_files=allow_extra_files,
+        allow_synthetic_s=allow_synthetic_s,
+    )
     romset = apply_swap_p(romset, swap_p, verbose=swap_verbose)
     romset = _apply_v2_size(romset, v2_size)
     return build_neo(romset, meta)
@@ -136,6 +150,9 @@ def mame_dir_to_neo(
     diagnostic: bool = False,
     swap_verbose: bool = True,
     v2_size: int | None = None,
+    *,
+    allow_extra_files: bool = False,
+    allow_synthetic_s: bool = False,
 ) -> bytes:
     """Convert a directory of MAME ROM files to a .neo binary.
 
@@ -150,8 +167,19 @@ def mame_dir_to_neo(
     v2_size
         Optional ADPCM-B (V2) byte count for the ``.neo`` header. When ``None``
         all V data is written to V1 (legacy layout). Must not exceed total V.
+    allow_extra_files
+        If True, unrecognized input files are ignored with a warning instead
+        of raising :class:`InvalidRomLayoutError`.
+    allow_synthetic_s
+        If True, a missing s1 ROM may be replaced with a zero-filled
+        placeholder. The result is not hardware-playable.
     """
-    romset = parse_mame_dir(dir_path, diagnostic=diagnostic)
+    romset = parse_mame_dir(
+        dir_path,
+        diagnostic=diagnostic,
+        allow_extra_files=allow_extra_files,
+        allow_synthetic_s=allow_synthetic_s,
+    )
     romset = apply_swap_p(romset, swap_p, verbose=swap_verbose)
     romset = _apply_v2_size(romset, v2_size)
     return build_neo(romset, meta)

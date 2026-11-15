@@ -14,9 +14,10 @@ from .constants import (
     _RE_SYNTH_S_KF10_BOOTLEG,
     _SYNTH_S_MAME_512K_SET_IDS,
 )
-from .exceptions import InvalidRomLayoutError
+from .exceptions import InvalidRomLayoutError, UnsupportedRomSetError
 from .interleave import interleave_c_chips
 from .models import RomSet
+from .unsupported import unsupported_set_reason
 
 
 def pack_psm_role_from_basename(filename: str) -> Optional[str]:
@@ -187,15 +188,19 @@ def collect_pack_sequence_issues(filenames: Iterable[str]) -> list[str]:
     return issues
 
 
-def collect_pack_psm_roles_for_validation(filenames: Iterable[str]) -> set[str]:
+def collect_pack_psm_roles_for_validation(
+    filenames: Iterable[str],
+    *,
+    allow_synthetic_s: bool = False,
+) -> set[str]:
     """
-    P/S/M roles satisfied for Pack validation, including boards with no s1 file.
+    P/S/M roles satisfied for Pack validation, matching the pack defaults.
 
-    MAME lists several sets (e.g. parent ``svc``) where the text layer has no
-    dedicated s1 ROM; the driver fills the fixed region with zeros. When such
-    a set is detected, ``S`` is treated as present for preflight only (pack
-    will still inject zero-fill S and warn that the result is not
-    hardware-playable).
+    A set with no physical ``s1`` is *not* reported as having ``S`` by default,
+    because pack now refuses to inject a zero-filled S unless the user enables
+    ``allow_synthetic_s`` (CLI: ``--allow-synthetic-s``). When that escape
+    hatch is on, a MAME ``fixed``-style zero fill is still treated as present
+    for preflight so the Pack tab can reach the real pack step.
     """
     names = tuple(filenames)
     roles: set[str] = set()
@@ -203,7 +208,11 @@ def collect_pack_psm_roles_for_validation(filenames: Iterable[str]) -> set[str]:
         r = pack_psm_role_from_basename(n)
         if r:
             roles.add(r)
-    if "S" not in roles and _should_inject_synthetic_s_rom(names, roles):
+    if (
+        allow_synthetic_s
+        and "S" not in roles
+        and _should_inject_synthetic_s_rom(names, roles)
+    ):
         roles.add("S")
     return roles
 
@@ -246,9 +255,10 @@ def _inject_synthetic_s_rom_if_needed(
     roles: dict[str, bytes],
     source: str,
     source_filenames: tuple[str, ...] | None,
+    allow_synthetic_s: bool,
 ) -> bool:
-    """Inject zero-filled S when needed. Returns True if injection happened."""
-    if "S" in roles or source_filenames is None:
+    """Inject zero-filled S when explicitly allowed. Returns True if injected."""
+    if not allow_synthetic_s or "S" in roles or source_filenames is None:
         return False
     names = source_filenames
     psm = {r for n in names if (r := pack_psm_role_from_basename(n))}
@@ -258,14 +268,28 @@ def _inject_synthetic_s_rom_if_needed(
     roles["S"] = b"\x00" * size
     warnings.warn(
         f"No text-layer ROM (s1) in {source}; using {size // 1024} KiB zero fill "
-        "as a MAME softlist-shaped placeholder so pack can complete. "
-        "The resulting .neo is NOT playable on TerraOnion / MiSTer hardware "
-        "(missing or corrupt text/fix layer). Prefer a set that ships a real "
-        "s1 (e.g. bootlegs like ms5plus), or repair S from a known-good .neo.",
+        "as a MAME softlist-shaped placeholder because --allow-synthetic-s is "
+        "enabled. The resulting .neo is NOT playable on TerraOnion / MiSTer "
+        "hardware (missing or corrupt text/fix layer). Prefer a set that ships "
+        "a real s1 (e.g. bootlegs like ms5plus), or repair S from a known-good "
+        ".neo.",
         UserWarning,
         stacklevel=3,
     )
     return True
+
+
+# Cap long ignored-file lists so layout errors stay readable.
+_MAX_EXTRA_FILES_IN_MESSAGE = 12
+
+
+def _format_file_list(names: list[str]) -> str:
+    shown = ", ".join(f"'{n}'" for n in names[:_MAX_EXTRA_FILES_IN_MESSAGE])
+    remaining = len(names) - _MAX_EXTRA_FILES_IN_MESSAGE
+    if remaining > 0:
+        shown += f", … (+{remaining} more)"
+    noun = "file" if len(names) == 1 else "files"
+    return f"{shown} ({len(names)} {noun})"
 
 
 def roles_to_romset(
@@ -273,21 +297,58 @@ def roles_to_romset(
     source: str = "",
     *,
     source_filenames: tuple[str, ...] | None = None,
+    allow_extra_files: bool = False,
+    allow_synthetic_s: bool = False,
+    ignored: Iterable[str] | None = None,
 ) -> RomSet:
     """
     Build a RomSet from a dict mapping role strings to raw bytes.
-    Raises :class:`~neoconv.core.InvalidRomLayoutError` for missing mandatory
-    ROMs or malformed C chip counts.
+
+    Raises :class:`~neoconv.core.InvalidRomLayoutError` for missing or empty
+    mandatory ROMs, unrecognized input files, or malformed C chip counts.
 
     When ``source_filenames`` is provided (ZIP member paths or directory
-    basenames), boards without a physical s1 ROM may receive a zero-filled
-    synthetic S region matching MAME's ``fixed`` area *size* so pack can
-    finish. That placeholder is **not** hardware-correct on TerraOnion /
-    MiSTer (see the ``UserWarning`` emitted on injection).
+    basenames), files that do not map to a Neo Geo role are rejected by
+    default so they cannot be silently dropped. ``allow_extra_files=True``
+    turns that into a warning.
+
+    Boards without a physical s1 ROM can receive a zero-filled synthetic S
+    region matching MAME's ``fixed`` area *size* only when
+    ``allow_synthetic_s=True``. That placeholder is **not** hardware-correct on
+    TerraOnion / MiSTer (see the ``UserWarning`` emitted on injection).
     """
     roles = dict(roles)
-    injected_s = _inject_synthetic_s_rom_if_needed(roles, source, source_filenames)
-    missing = [r for r in ("P", "S", "M") if r not in roles]
+    if ignored is None and source_filenames is not None:
+        ignored = [
+            name
+            for name in source_filenames
+            if _c_letter_split_part(name) is None and name_to_role(name) is None
+        ]
+    ignored = list(ignored or ())
+    if ignored and not allow_extra_files:
+        raise InvalidRomLayoutError(
+            f"Unrecognized file(s) in {source or 'input'}: "
+            f"{_format_file_list(ignored)}. Packing would drop them from the "
+            ".neo, which can truncate the program or sprite data, so it is "
+            "refused by default.",
+            hint=(
+                "Rename the files to Neo Geo role names (p1/s1/m1/v1/c1…) or "
+                "pass --allow-extra-files (GUI: \"Allow extra files\") to pack "
+                "without them."
+            ),
+        )
+    if ignored:
+        warnings.warn(
+            f"Ignoring {_format_file_list(ignored)} in {source or 'input'} "
+            "because extra files are allowed; the .neo will not contain them.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+    injected_s = _inject_synthetic_s_rom_if_needed(
+        roles, source, source_filenames, allow_synthetic_s
+    )
+    missing = [r for r in ("P", "S", "M") if not roles.get(r)]
     if missing:
         tips_by_role = {
             "P": "P program ROM missing (expected p1/p2, e.g. game-p1.bin or game.p1)",
@@ -295,11 +356,22 @@ def roles_to_romset(
             "M": "M ROM missing (expected m1, e.g. game-m1.bin or game.m1)",
         }
         tips = "; ".join(tips_by_role[r] for r in missing)
+        hint = None
+        if "S" in missing and source_filenames is not None:
+            names = tuple(source_filenames)
+            psm = {r for n in names if (r := pack_psm_role_from_basename(n))}
+            if _should_inject_synthetic_s_rom(names, psm):
+                hint = (
+                    "This set has no physical s1 ROM. Pass --allow-synthetic-s "
+                    "(GUI: \"Allow synthetic S\") only if you accept a "
+                    "non-playable zero-filled text layer."
+                )
         raise InvalidRomLayoutError(
             f"Missing mandatory ROM(s) in {source or 'input'}: "
             f"{', '.join(missing)}. "
             f"Quick tips: {tips}. "
-            "Use --diagnostic to list unrecognized filenames."
+            "Use --diagnostic to list unrecognized filenames.",
+            hint=hint,
         )
 
     p_rom = roles.get("P", b"") + roles.get("P2", b"")
@@ -357,7 +429,23 @@ def roles_to_romset(
                 "The ROM data may be corrupt or incorrectly split."
             )
 
-    c_rom = interleave_c_chips(c_chips_raw) if c_chips_raw else b""
+    if not v_rom:
+        raise InvalidRomLayoutError(
+            f"No V (audio) ROM data in {source or 'input'}. Expected at least "
+            "one v1..v8 file (e.g. game-v1.bin or game.v1). Refusing to build "
+            "a .neo with an empty V region.",
+            hint="Use --diagnostic to list unrecognized filenames.",
+        )
+
+    if not c_chips_raw:
+        raise InvalidRomLayoutError(
+            f"No C (sprite) ROM data in {source or 'input'}. Expected c1/c2 … "
+            "sprite chips (e.g. game-c1.bin or game.c1). Refusing to build a "
+            ".neo with an empty C region.",
+            hint="Use --diagnostic to list unrecognized filenames.",
+        )
+
+    c_rom = interleave_c_chips(c_chips_raw)
     return RomSet(p=p_rom, s=s_rom, m=m_rom, v=v_rom, c=c_rom)
 
 
@@ -439,6 +527,8 @@ def _romset_from_collected_roles(
     all_names: list[str],
     source: str,
     diagnostic: bool,
+    allow_extra_files: bool = False,
+    allow_synthetic_s: bool = False,
 ) -> RomSet:
     """Flush split C parts, emit diagnostic warnings, build a RomSet."""
     _flush_c_letter_parts(c_parts, roles)
@@ -449,10 +539,38 @@ def _romset_from_collected_roles(
                 "check naming (expected e.g. game-p1.bin, game-c1.c1, ...)",
                 stacklevel=3,
             )
-    return roles_to_romset(roles, source=source, source_filenames=tuple(all_names))
+    return roles_to_romset(
+        roles,
+        source=source,
+        source_filenames=tuple(all_names),
+        allow_extra_files=allow_extra_files,
+        allow_synthetic_s=allow_synthetic_s,
+        ignored=ignored,
+    )
 
 
-def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
+def _reject_unsupported_set(set_name: str) -> None:
+    """Fail early for known encrypted/protected/4-chip-C MAME sets."""
+    reason = unsupported_set_reason(set_name)
+    if reason is None:
+        return
+    raise UnsupportedRomSetError(
+        f"MAME set '{set_name}' is not supported yet: {reason}. Packing it "
+        "now would produce a wrong or incomplete .neo, so it is refused.",
+        hint=(
+            "Support requires the deferred layout/decrypt work. Use a "
+            "known-good .neo or an unencrypted bootleg set in the meantime."
+        ),
+    )
+
+
+def parse_mame_zip(
+    zip_path: Path,
+    diagnostic: bool = False,
+    *,
+    allow_extra_files: bool = False,
+    allow_synthetic_s: bool = False,
+) -> RomSet:
     """Parse a MAME ROM zip and return a RomSet.
 
     Parameters
@@ -460,7 +578,22 @@ def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
     zip_path   : path to the ZIP file
     diagnostic : if True, print a warning for every file that was not
                  recognized, so the user can diagnose naming issues.
+    allow_extra_files
+                 if True, ignore unrecognized files with a warning instead of
+                 failing. Defaults to False to prevent silent data loss.
+    allow_synthetic_s
+                 if True, inject a zero-filled S region for MAME boards that
+                 have no s1 ROM. Defaults to False (missing S is an error).
+
+    Raises
+    ------
+    UnsupportedRomSetError
+        When the ZIP stem names a known encrypted/protected/4-chip-C set.
+    InvalidRomLayoutError
+        For unrecognized files (unless allowed), missing/empty P/S/M/V/C, or
+        malformed C chips.
     """
+    _reject_unsupported_set(zip_path.stem)
     roles: dict[str, bytes] = {}
     c_parts: dict[str, dict[str, bytes]] = {}
     ignored: list[str] = []
@@ -483,11 +616,24 @@ def parse_mame_zip(zip_path: Path, diagnostic: bool = False) -> RomSet:
         raise InvalidRomLayoutError(f"Cannot open ZIP file '{zip_path}': {e}") from e
 
     return _romset_from_collected_roles(
-        roles, c_parts, ignored, all_names, str(zip_path), diagnostic
+        roles,
+        c_parts,
+        ignored,
+        all_names,
+        str(zip_path),
+        diagnostic,
+        allow_extra_files=allow_extra_files,
+        allow_synthetic_s=allow_synthetic_s,
     )
 
 
-def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
+def parse_mame_dir(
+    dir_path: Path,
+    diagnostic: bool = False,
+    *,
+    allow_extra_files: bool = False,
+    allow_synthetic_s: bool = False,
+) -> RomSet:
     """Parse a directory of raw ROM files and return a RomSet.
 
     Parameters
@@ -495,13 +641,29 @@ def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
     dir_path   : directory containing ROM files
     diagnostic : if True, print a warning for every file that was not
                  recognized, so the user can diagnose naming issues.
+    allow_extra_files
+                 if True, ignore unrecognized files with a warning instead of
+                 failing. Defaults to False to prevent silent data loss.
+    allow_synthetic_s
+                 if True, inject a zero-filled S region for MAME boards that
+                 have no s1 ROM. Defaults to False (missing S is an error).
 
     Notes
     -----
     Files in the top-level directory and one level of subdirectories are
     included (typical unzip layout). Entries are processed in sorted order so
     diagnostics and ``source_filenames`` metadata are reproducible.
+
+    Raises
+    ------
+    UnsupportedRomSetError
+        When the directory basename names a known encrypted/protected/4-chip-C
+        set.
+    InvalidRomLayoutError
+        For unrecognized files (unless allowed), missing/empty P/S/M/V/C, or
+        malformed C chips.
     """
+    _reject_unsupported_set(dir_path.name)
     roles: dict[str, bytes] = {}
     c_parts: dict[str, dict[str, bytes]] = {}
     ignored: list[str] = []
@@ -511,5 +673,12 @@ def parse_mame_dir(dir_path: Path, diagnostic: bool = False) -> RomSet:
         _ingest_named_rom(f.name, f.read_bytes(), roles, c_parts, ignored, diagnostic)
 
     return _romset_from_collected_roles(
-        roles, c_parts, ignored, all_names, str(dir_path), diagnostic
+        roles,
+        c_parts,
+        ignored,
+        all_names,
+        str(dir_path),
+        diagnostic,
+        allow_extra_files=allow_extra_files,
+        allow_synthetic_s=allow_synthetic_s,
     )
