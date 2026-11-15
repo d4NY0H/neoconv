@@ -6,7 +6,7 @@
 
 > A preservation-focused **CLI and GUI** tool to **convert** between **TerraOnion `.neo` containers** and **MAME / Darksoft Neo Geo ROM sets**, and to **edit `.neo` header metadata** (name, manufacturer, year, genre, NGH, screenshot index) **without repacking** ROM data.
 
-Use **`neoconv`** on the command line or via **`neoconv-gui`** (same core engine). It **packs** MAME ZIPs or ROM folders into `.neo`, **extracts** `.neo` back to individual ROM files, and **rewrites** headers when only metadata needs to change. It handles C-ROM byte-interleaving, **P-ROM half-swap** (default: **auto-detect** from the M68000 vector table, with `yes` / `no` overrides), V-ROM chunking, and TerraOnion header fields — for commercial dumps, hacks, CD conversions, and homebrew.
+Use **`neoconv`** on the command line or via **`neoconv-gui`** (same core engine). It **packs** MAME ZIPs or ROM folders into `.neo`, **extracts** `.neo` back to individual ROM files, and **rewrites** headers when only metadata needs to change. It handles C-ROM byte-interleaving, **P-ROM half-swap** (default: **auto-detect** from the M68000 vector table, with `yes` / `no` overrides), V-ROM chunking, and TerraOnion header fields. The scope is **broad but fail-closed**: standard MAME-style Neo Geo sets are converted, while protected, encrypted or unusual layouts are rejected with a clear error instead of producing a broken `.neo`.
 
 ### Getting started
 
@@ -26,10 +26,27 @@ Most Neo Geo tools only handle one direction or break on non-standard sets. `neo
 | Property | Description |
 |----------|-------------|
 | **Reliable** | Deterministic conversions with automated tests for core roundtrip behaviour |
-| **Universal** | Handles commercial sets, hacks, CD conversions, and homebrew |
+| **Broad but fail-closed** | Converts standard P/S/M/V/C sets and 2-chip C interleaves; rejects protected, encrypted, ADPCM-A/B `v11`/`v21` and other unusual layouts rather than writing a corrupt `.neo` |
 | **Transparent** | C interleaving, P-ROM swap (auto or manual), and V chunking are explicit and documented |
 | **Configurable** | On **extract**: `--c-chip-size` and `--v-bank-size` in bytes. **neoconv** falls back to **2 MB** (`2097152`) when unset; the correct value per game comes from the MAME ROM set (e.g. 4 MB / `4194304` C chips for Neo Turf Masters), not from the `.neo` header alone |
 | **Dual interface** | Same pack / extract / edit / info workflows in CLI and GUI |
+
+---
+
+## Supported and rejected inputs
+
+neoconv is **broad but fail-closed**: when it cannot prove that a set will be packed byte-correctly, it stops instead of silently dropping or truncating ROM data.
+
+| Input | Status | Notes |
+|-------|--------|-------|
+| Standard P/S/M/V/C MAME-style sets | ✅ Supported | `p1` (+ `p2`), `s1`, `m1`, `v1`–`v8`, `c1`–`c16` with the extensions or suffix patterns listed in [Pack input](#pack-input-rom-file-naming) |
+| 2-chip C interleave | ✅ Supported | C chips come in equal-sized pairs (`c1`+`c2`, `c3`+`c4`, …); letter-split parts `c1a`+`c1b`+… are merged first |
+| Explicit ADPCM-B split with `--v2-size` | ✅ Supported | Sets V2 (ADPCM-B) to the given byte count and derives V1 (ADPCM-A); no automatic classification |
+| 67 known protected / encrypted / 4-chip-C sets | ❌ Rejected | CMC42/CMC50/PVC/SMA/PCM2/K2K2 and audiocrypt families plus 4-chip-C prototypes, listed in `neoconv/core/unsupported.py` |
+| ADPCM-A/B `v11` / `v21` V-chip naming | ❌ Rejected | Needs the deferred region/layout engine; only standard `v1`–`v8` audio sets are supported |
+| Unrecognized ROM-like files | ❌ Rejected | `--allow-extra-files` may ignore only clearly non-ROM extras (README, `.txt`, `.dat`, …) |
+| Missing or empty V / C regions | ❌ Rejected | A `.neo` is never built with an empty audio or sprite region |
+| Set without a physical `s1` | ❌ Rejected by default | `--allow-synthetic-s` opts in to a zero-filled S placeholder that is **not playable** on hardware |
 
 ---
 
@@ -180,7 +197,7 @@ python3 -m neoconv <command> [options]
 
 Commands: **`extract`**, **`pack`**, **`edit`**, **`detect-swap`**, **`info`**.
 
-On failure, the CLI prints `Error: …` to **stderr** and exits with code **1** (missing ROMs, invalid options, bad `.neo`, and similar cases) instead of a Python traceback.
+On expected failures, the CLI prints `Error: …` to **stderr** and exits with code **1** (missing ROMs, invalid options, bad `.neo`, and similar cases) instead of a Python traceback. Unexpected internal errors are not masked and may still show a traceback so they can be reported.
 
 ---
 
@@ -271,7 +288,10 @@ neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
 | `--screenshot` | `0` | TerraOnion screenshot index: **uint32** (non-negative integer). |
 | `--out`, `-o` | *(input stem + `.neo`)* | Output `.neo` path |
 | `--swap-p` | `auto` | P-ROM half-swap mode: `auto` (heuristic, default), `yes` (always), `no` (never) |
-| `--diagnostic` | off | Warn on unrecognized filenames |
+| `--v2-size` | *(unset)* | ADPCM-B (V2) size in **bytes** for the `.neo` header; V1 is derived as total V minus this value. Omit to write all V data to V1 with V2 = 0 (legacy layout). Must not exceed the total V size. Automatic ADPCM-B detection is not implemented. |
+| `--allow-extra-files` | off | Ignore clearly non-ROM extras (README, `.txt`, `.dat`, …) with a warning instead of failing. Unrecognized files that still look like ROM data remain hard errors, so P/V/C data cannot be truncated. |
+| `--allow-synthetic-s` | off | Replace a missing `s1` with a zero-filled placeholder. The result is **not playable** on TerraOnion / MiSTer hardware (missing or corrupt text layer); by default a missing S ROM is an error. |
+| `--diagnostic` | off | Warn on unrecognized filenames (informational only; it does not override any failure) |
 
 **Genres** (`--genre` name or numeric id):
 
@@ -398,9 +418,11 @@ The table below matches the primary rules in `name_to_role`: extension (e.g. `.p
 
 #### Synthetic S-ROM (no physical `s1`)
 
-Some MAME parents (e.g. PVC / encrypted boards such as `mslug5`, `samsho5`, `svc`, `kof2003`) ship **without** a separate text-layer `s1`; the emulator driver uses a zero-filled "fixed" region. If **P** and **M** are present, there is **no** `s1`, but filenames look like a Neo Geo **C1** sprite set, `neoconv` may **inject** a zero-filled `S` region and emit a `UserWarning`.
+Some MAME-style sets ship **without** a separate text-layer `s1`; the emulator driver uses a zero-filled "fixed" region. A missing S is an **error by default**. With `--allow-synthetic-s`, and only when **P** and **M** are present and the filenames look like a Neo Geo **C1** sprite set, `neoconv` may **inject** a zero-filled `S` region and emit a `UserWarning`.
 
-That fill matches MAME softlist **size** heuristics so pack can complete — it is **not** a hardware-correct `.neo`. On TerraOnion / MiSTer (and similar cores) the text/fix layer will be **missing or corrupt**. Bootlegs that **do** include an `s1` (e.g. `ms5plus`) pack normally. There is currently **no** path to derive real s1 tiles from C-ROM data.
+That fill matches MAME softlist **size** heuristics so pack can complete — it is **not** a hardware-correct `.neo`. On TerraOnion / MiSTer (and similar cores) the text/fix layer will be **missing or corrupt**, so the result is unplayable. Bootlegs that **do** include an `s1` (e.g. `svcboot`) pack normally. There is currently **no** path to derive real s1 tiles from C-ROM data.
+
+Known encrypted parents such as `mslug5`, `samsho5`, `svc` and `kof2003` are rejected outright by the supported-set gate before synthetic S is considered.
 
 | Pattern | Synthetic S size |
 |---------|------------------|
@@ -426,11 +448,11 @@ Sets where C-chip filenames carry a suffix in the **stem** but use native extens
 | `kog`, `kogplus` | `5232-c1a.bin` + `5232-c1b.bin` → `c1`, etc. |
 | `kof10th` and variants | `kf10-c1a.bin` + `kf10-c1b.bin` → `c1`, etc. |
 
-A single letter part alone (e.g. only `kf10-c1a.bin` / `kf10-c2a.bin`) is also accepted as the full chip. All official SNK titles and the vast majority of hacks work without any preparation.
+A single letter part alone (e.g. only `kf10-c1a.bin` / `kf10-c2a.bin`) is also accepted as the full chip. Letter parts must be contiguous from `a`: a gap such as `c1a` + `c1c` without `c1b` aborts instead of silently dropping the missing bytes. Most standard titles and hacks work without any preparation; known protected/encrypted sets are rejected as listed in [Supported and rejected inputs](#supported-and-rejected-inputs).
 
 #### Ignored files
 
-Standard BIOS files (`000-lo.lo`, `sfix.sfix`, etc.) are ignored. Unknown files are also ignored unless `--diagnostic` is enabled.
+Standard BIOS files (`000-lo.lo`, `sfix.sfix`, etc.) are ignored. Unrecognized files **fail the pack by default** so ROM data cannot be dropped silently; `--allow-extra-files` ignores only clearly non-ROM extras, and `--diagnostic` lists what was not recognized without overriding the failure.
 
 ---
 
@@ -531,9 +553,13 @@ When auto-detect is **inconclusive** (neither half has plausible M68k vectors), 
 
 ### `.neo` container format
 
-#### V1 / V2 size fields (read vs write)
+#### V1 / V2 size fields (ADPCM-A / ADPCM-B)
 
-Some `.neo` files split the **total V ROM payload** across the **V1** and **V2** size fields at offsets `0x010` and `0x014`. **neoconv** reads both and merges the bytes in memory. On **output** (`pack`, `build_neo`, `replace_neo_metadata`), the header is **normalised**: all V length is stored in **V1** and **V2 is set to 0** (TerraOnion-style layout). Loading or rewriting such a file may emit a **`UserWarning`**.
+Some `.neo` files split the **total V ROM payload** across the **V1** size field at `0x010` (ADPCM-A) and the **V2** size field at `0x014` (ADPCM-B). **neoconv** reads both sizes and treats the V payload as V1 bytes followed by V2 bytes.
+
+The split is **preserved**: `edit`, `build_neo` and `replace_neo_metadata` keep the V1/V2 sizes of an existing `.neo`. Values are **not normalised**, V2 is not zeroed, and V2 bytes are never moved into V1, so a file that carries a split keeps it through a metadata edit.
+
+When packing a MAME set, **`--v2-size BYTES`** supplies the ADPCM-B size explicitly and V1 is derived as `total V − v2_size`. Omitting the option writes all V data to V1 with V2 = 0 (legacy layout). Automatic ADPCM-A/B classification is **not implemented**; MAME sets that use `v11`/`v21` V-chip naming are rejected (see [Supported and rejected inputs](#supported-and-rejected-inputs)).
 
 #### Header and payload layout
 
@@ -542,8 +568,8 @@ Offset 0x000   Magic         b'NEO\x01'  (4 bytes)
 Offset 0x004   P ROM size    uint32 LE
 Offset 0x008   S ROM size    uint32 LE
 Offset 0x00C   M ROM size    uint32 LE
-Offset 0x010   V1 ROM size   uint32 LE   (all V data merged here on write; read accepts split V1/V2)
-Offset 0x014   V2 ROM size   uint32 LE   (0 when written by neoconv; non-zero allowed on read)
+Offset 0x010   V1 ROM size   uint32 LE   (ADPCM-A; preserved on read/edit/build; `--v2-size` sets it for pack)
+Offset 0x014   V2 ROM size   uint32 LE   (ADPCM-B; preserved; 0 when pack is run without `--v2-size`)
 Offset 0x018   C ROM size    uint32 LE   (total, interleaved)
 Offset 0x01C   Year          uint32 LE
 Offset 0x020   Genre         uint32 LE

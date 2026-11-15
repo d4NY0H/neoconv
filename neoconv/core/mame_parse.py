@@ -295,6 +295,21 @@ _RE_ROM_ROLE_IN_STEM = re.compile(
 )
 _ROM_DATA_SUFFIXES = frozenset({".bin", ".rom"})
 
+# MAME ADPCM-A/B V-chip naming (``001-v11.v11`` / ``001-v21.v21``). These are
+# flattened 16-bit V-ROM layouts, not the standard byte-wide v1..v8 chips, and
+# mapping them as ordinary V data would produce a wrong audio region.
+_RE_ADPCM_V_CHIP_STEM = re.compile(r"(?:^|[-_])v(?:11|21)$", re.IGNORECASE)
+_RE_ADPCM_V_CHIP_EXT = re.compile(r"^v(?:11|21)$", re.IGNORECASE)
+
+
+def _is_adpcm_ab_v_chip(filename: str) -> bool:
+    """True for ADPCM-A/B ``v11`` / ``v21`` chip names that need a region map."""
+    path = Path(filename)
+    suffix = path.suffix.lstrip(".")
+    if _RE_ADPCM_V_CHIP_EXT.match(suffix):
+        return True
+    return bool(_RE_ADPCM_V_CHIP_STEM.search(path.stem))
+
 
 def _looks_like_neo_geo_rom(filename: str) -> bool:
     """
@@ -359,6 +374,18 @@ def roles_to_romset(
             if _c_letter_split_part(name) is None and name_to_role(name) is None
         ]
     ignored = list(ignored or ())
+    adpcm_v = [name for name in ignored if _is_adpcm_ab_v_chip(name)]
+    if adpcm_v:
+        raise InvalidRomLayoutError(
+            f"ADPCM-A/B V-chip naming in {source or 'input'}: "
+            f"{_format_file_list(adpcm_v)}. MAME sets that use v11/v21-style "
+            "V chips need the region/layout engine, which is not implemented "
+            "yet, so packing is refused even with --allow-extra-files.",
+            hint=(
+                "Only standard v1..v8 ADPCM ROM sets are supported. Use a set "
+                "with v1..v8 naming, or start from an existing .neo."
+            ),
+        )
     if ignored and not allow_extra_files:
         raise InvalidRomLayoutError(
             f"Unrecognized file(s) in {source or 'input'}: "
@@ -546,11 +573,34 @@ def _flush_c_letter_parts(
     c_parts: dict[str, dict[str, bytes]],
     roles: dict[str, bytes],
 ) -> None:
-    """Concatenate letter-split C parts in alphabetical order into *roles*."""
+    """
+    Concatenate letter-split C parts in alphabetical order into *roles*.
+
+    Letters must be contiguous from ``a``: silently sorting and joining
+    ``c1a`` + ``c1c`` would drop the bytes a missing ``c1b`` should have
+    supplied, so such gaps are rejected instead.
+    """
     for role, parts in sorted(c_parts.items(), key=lambda item: item[0]):
         letters = sorted(parts)
+        last = letters[-1]
+        expected = [chr(ord("a") + i) for i in range(ord(last) - ord("a") + 1)]
+        missing = [letter for letter in expected if letter not in parts]
+        if missing:
+            chip = f"c{role[1:].lower()}"
+            found = ", ".join(f"{chip}{letter}" for letter in letters)
+            absent = ", ".join(f"{chip}{letter}" for letter in missing)
+            raise InvalidRomLayoutError(
+                f"Split C chip {role} is missing part(s): {absent} "
+                f"(found {found}).",
+                hint=(
+                    "Letter-split C parts must be contiguous from 'a' "
+                    "(c1a, c1b, c1c, …) so the merged chip keeps the correct "
+                    "byte order. Add the missing part(s) or use a complete "
+                    f"{chip} file."
+                ),
+            )
         merged = b"".join(parts[letter] for letter in letters)
-        label = "+".join(f"{role[1:].lower()}{letter}" for letter in letters)
+        label = "+".join(f"c{role[1:].lower()}{letter}" for letter in letters)
         _store_role_data(roles, role, merged, f"merged ({label})", False)
 
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neoconv"
-version = "1.5.1"
+version = "1.5.2"
 description = "Convert between .neo container files and MAME / Darksoft Neo Geo ROM sets"
 readme = "README.md"
 license = { text = "MIT" }
@@ -28,6 +28,8 @@ Issues   = "https://github.com/d4NY0H/neoconv/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["neoconv*"]
+exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 neoconv = ["py.typed"]

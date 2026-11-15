@@ -896,6 +896,47 @@ class TestCoreEdgeCases:
         assert len(rs.s) == 0x40000
         assert len(rs.c) == C_BANK_SIZE  # interleaved pair of half-size chips
 
+    def test_c_letter_parts_three_contiguous_parts_merge(self, tmp_path):
+        """A contiguous c1a+c1b+c1c set is merged in letter order."""
+        z = tmp_path / "three_part.zip"
+        part = C_BANK_SIZE // 4
+        parts = [make_rom(part, 0x10 + i) for i in range(3)]
+        roles = [
+            ("game-p1.bin", make_rom(1024, 1)),
+            ("game-s1.bin", make_rom(1024, 2)),
+            ("game-m1.bin", make_rom(1024, 3)),
+            ("game-v1.bin", make_rom(1024, 4)),
+        ]
+        roles += [
+            (f"game-c1{letter}.bin", data)
+            for letter, data in zip("abc", parts)
+        ]
+        roles += [
+            (f"game-c2{letter}.bin", make_rom(part, 0x20 + i))
+            for i, letter in enumerate("abc")
+        ]
+        write_role_zip(z, roles)
+        rs = parse_mame_zip(z)
+        c2_merged = b"".join(make_rom(part, 0x20 + i) for i in range(3))
+        assert rs.c == interleave_c_chips([b"".join(parts), c2_merged])
+
+    def test_c_letter_part_gap_rejected(self, tmp_path):
+        """c1a + c1c without c1b must fail instead of dropping the gap."""
+        z = tmp_path / "c_gap.zip"
+        half = C_BANK_SIZE // 2
+        write_role_zip(z, [
+            ("game-p1.bin", make_rom(1024, 1)),
+            ("game-s1.bin", make_rom(1024, 2)),
+            ("game-m1.bin", make_rom(1024, 3)),
+            ("game-v1.bin", make_rom(1024, 4)),
+            ("game-c1a.bin", make_rom(half, 0x11)),
+            ("game-c1c.bin", make_rom(half, 0x13)),
+        ])
+        with pytest.raises(InvalidRomLayoutError) as exc:
+            parse_mame_zip(z)
+        assert "c1b" in str(exc.value)
+        assert "contiguous" in (exc.value.hint or "")
+
     def test_parse_mame_zip_kof10th_merges_c1a_c1b_parts(self, tmp_path):
         """Split C parts (c1a+c1b) are concatenated before interleaving."""
         z = tmp_path / "kf10_full.zip"
@@ -1530,6 +1571,19 @@ class TestFailClosedPack:
         with pytest.raises(InvalidRomLayoutError) as exc:
             parse_mame_zip(z)
         assert "sp1.sp1" in str(exc.value)
+
+    @pytest.mark.parametrize("name", ["001-v11.v11", "001-v21.v21"])
+    @pytest.mark.parametrize("allow_extra", [False, True])
+    def test_adpcm_ab_v11_v21_naming_rejected(self, tmp_path, name, allow_extra):
+        """ADPCM-A/B v11/v21 layouts need a region engine and must not be dropped."""
+        z = tmp_path / "adpcm_ab_fixture.zip"
+        write_complete_mame_zip(z, extra=((name, make_rom(1024, 0x77)),))
+        with pytest.raises(InvalidRomLayoutError) as exc:
+            parse_mame_zip(z, allow_extra_files=allow_extra)
+        msg = str(exc.value)
+        assert name in msg
+        assert "ADPCM-A/B" in msg
+        assert "v1..v8" in (exc.value.hint or "")
 
     def test_extra_file_fails_by_default(self, tmp_path):
         z = tmp_path / "set.zip"

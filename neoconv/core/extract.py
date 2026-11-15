@@ -39,8 +39,9 @@ def validate_name_prefix(name_prefix: str) -> str:
     InvalidConfigurationError
         For an empty prefix, ``.`` / ``..``, absolute or drive-letter forms,
         path separators (``/`` or ``\\``), NUL, or other control characters.
-        A plain colon is only rejected on Windows, where it cannot appear in a
-        filename; on POSIX ``foo:bar`` is a valid name and stays allowed.
+        A leading drive-letter form such as ``C:`` is always rejected; any
+        other colon is only rejected on Windows, where it cannot appear in a
+        filename. On POSIX ``foo:bar`` is a valid name and stays allowed.
     """
     if not isinstance(name_prefix, str):
         raise InvalidConfigurationError(
