@@ -116,6 +116,18 @@ def write_role_zip(path: Path, roles: list[tuple[str, bytes]]) -> None:
             zf.writestr(name, data)
 
 
+def corrupt_zip_member_data(path: Path, member: str = "game-p1.bin") -> None:
+    """Flip bytes in a deflated member's compressed data so reads fail."""
+    with zipfile.ZipFile(path) as zf:
+        info = zf.getinfo(member)
+    raw = bytearray(path.read_bytes())
+    name_len, extra_len = struct.unpack_from("<HH", raw, info.header_offset + 26)
+    start = info.header_offset + 30 + name_len + extra_len
+    raw[start] ^= 0xFF
+    raw[start + 1] ^= 0xFF
+    path.write_bytes(bytes(raw))
+
+
 def make_neo_with_v2_split(
     *,
     v1: bytes = b"AAA",
@@ -1953,6 +1965,20 @@ class TestExtractionSafety:
     def test_validate_name_prefix_accepts_plain_component(self, prefix):
         assert validate_name_prefix(prefix) == prefix
 
+    @pytest.mark.skipif(os.name == "nt", reason="':' is invalid in Windows filenames")
+    def test_validate_name_prefix_allows_posix_colon(self, tmp_path):
+        assert validate_name_prefix("foo:bar") == "foo:bar"
+
+        rs = make_romset()
+        written = extract_romset(
+            rs,
+            tmp_path / "out",
+            name_prefix="foo:bar",
+            v_bank_size=1024 * 1024,
+        )
+        assert written["p1"].name == "foo:bar-p1.bin"
+        assert written["p1"].exists()
+
     @pytest.mark.parametrize(
         "prefix",
         [
@@ -1963,6 +1989,7 @@ class TestExtractionSafety:
             "..\\evil",
             "/tmp/evil",
             "C:evil",
+            "z:evil",
             "C:\\temp\\evil",
             "sub/evil",
             "sub\\evil",
@@ -2045,6 +2072,25 @@ class TestExtractionSafety:
         assert not out.exists()
         assert list(tmp_path.iterdir()) == []
 
+    def test_existing_output_survives_validation_failure(self, tmp_path):
+        rs = RomSet(
+            p=make_rom(4096, 0xAA),
+            s=make_rom(128, 0xBB),
+            m=make_rom(128, 0xCC),
+            v=make_rom(256, 0xDD),
+            c=b"\x00" * 100,
+        )
+        out = tmp_path / "out"
+        out.mkdir()
+        existing = out / "g-p1.bin"
+        existing.write_bytes(b"KEEP")
+
+        with pytest.raises(InvalidConfigurationError):
+            extract_romset(rs, out, name_prefix="g", v_bank_size=256)
+
+        assert existing.read_bytes() == b"KEEP"
+        assert sorted(p.name for p in out.iterdir()) == ["g-p1.bin"]
+
 
 class TestWriteBytesAtomicHardening:
     def test_replaces_content(self, tmp_path):
@@ -2063,6 +2109,28 @@ class TestWriteBytesAtomicHardening:
             assert stat.S_IMODE(p.stat().st_mode) == 0o600
         finally:
             os.chmod(p, 0o600)
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+    def test_mode_copy_failure_is_best_effort(self, monkeypatch, tmp_path):
+        p = tmp_path / "mode-less.neo"
+        p.write_bytes(b"old")
+        os.chmod(p, 0o600)
+
+        def _fail(*_args, **_kwargs):
+            raise OSError("mode-less mount")
+
+        monkeypatch.setattr("neoconv.core.neo_format.os.fchmod", _fail, raising=False)
+        monkeypatch.setattr("neoconv.core.neo_format.os.chmod", _fail, raising=False)
+
+        old = os.umask(0)
+        try:
+            write_bytes_atomic(p, b"new")
+        finally:
+            os.umask(old)
+
+        assert p.read_bytes() == b"new"
+        # Mode preservation failed, so the umask-derived temp mode is kept.
+        assert stat.S_IMODE(p.stat().st_mode) == 0o666
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
     def test_new_file_mode_follows_umask(self, tmp_path):
@@ -2140,4 +2208,56 @@ class TestPOnlyZipReader:
         z.write_bytes(b"not a zip")
         with pytest.raises(InvalidRomLayoutError, match="Cannot open ZIP file"):
             read_p_rom_from_zip(z)
+
+    @pytest.mark.parametrize("role", ["p1", "p2"])
+    def test_duplicate_role_members_raise_clear_error(self, tmp_path, role):
+        z = tmp_path / "duplicate.zip"
+        write_role_zip(
+            z,
+            [
+                (f"game-{role}.bin", b"FIRST"),
+                (f"folder/game-{role}.bin", b"SECOND"),
+            ],
+        )
+        with pytest.raises(InvalidRomLayoutError, match="Duplicate"):
+            read_p_rom_from_zip(z)
+
+    def test_duplicate_member_names_do_not_inflate_data(self, tmp_path):
+        z = tmp_path / "same-name.zip"
+        with zipfile.ZipFile(z, "w") as zf:
+            zf.writestr("game-p1.bin", b"FIRST")
+            with pytest.warns(UserWarning, match="Duplicate name"):
+                zf.writestr("game-p1.bin", b"SECOND")
+
+        with pytest.raises(InvalidRomLayoutError, match="Duplicate P ROM"):
+            read_p_rom_from_zip(z)
+
+    def test_corrupt_member_raises_typed_error(self, tmp_path):
+        z = tmp_path / "corrupt.zip"
+        with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("game-p1.bin", b"PROGRAM ROM " * 2048)
+        corrupt_zip_member_data(z)
+
+        with pytest.raises(InvalidRomLayoutError, match="Cannot open ZIP file"):
+            read_p_rom_from_zip(z)
+        with pytest.raises(InvalidRomLayoutError, match="Cannot open ZIP file"):
+            parse_mame_zip(z)
+
+    def test_parse_mame_zip_duplicate_p_members_raise(self, tmp_path):
+        z = tmp_path / "duplicate-set.zip"
+        write_role_zip(
+            z,
+            [
+                ("game-p1.bin", b"P"),
+                ("folder/game-p1.bin", b"P"),
+                ("game-s1.bin", b"S"),
+                ("game-m1.bin", b"M"),
+                ("game-v1.bin", b"V"),
+                ("game-c1.bin", b"C"),
+                ("game-c2.bin", b"C"),
+            ],
+        )
+        with pytest.raises(InvalidRomLayoutError, match="Duplicate ROM role 'P'"):
+            parse_mame_zip(z)
+
 

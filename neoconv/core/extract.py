@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import io
+import os
+import re
 import warnings
 import zipfile
 from collections.abc import Callable, Sequence
@@ -26,7 +28,7 @@ def validate_name_prefix(name_prefix: str) -> str:
 
     Output names are built as ``<prefix>-<role><n><ext>``. Because the prefix is
     concatenated directly into that name, it must not be able to introduce path
-    separators, an absolute path, a drive/scheme form, or control characters;
+    separators, an absolute path, a Windows drive letter, or control characters;
     otherwise ``--prefix ../../evil`` (or a crafted ZIP name) could write outside
     the requested output directory or produce a malformed archive member.
 
@@ -35,8 +37,10 @@ def validate_name_prefix(name_prefix: str) -> str:
     Raises
     ------
     InvalidConfigurationError
-        For an empty prefix, ``.`` / ``..``, absolute or drive-like forms, path
-        separators (``/`` or ``\\``), NUL, or other control characters.
+        For an empty prefix, ``.`` / ``..``, absolute or drive-letter forms,
+        path separators (``/`` or ``\\``), NUL, or other control characters.
+        A plain colon is only rejected on Windows, where it cannot appear in a
+        filename; on POSIX ``foo:bar`` is a valid name and stays allowed.
     """
     if not isinstance(name_prefix, str):
         raise InvalidConfigurationError(
@@ -60,10 +64,12 @@ def validate_name_prefix(name_prefix: str) -> str:
             "are not allowed.",
             hint=_INVALID_PREFIX_HINT,
         )
-    if ":" in name_prefix:
+    if re.match(r"^[A-Za-z]:", name_prefix) or (
+        os.name == "nt" and ":" in name_prefix
+    ):
         raise InvalidConfigurationError(
-            f"Invalid output filename prefix {name_prefix!r}: drive letters and "
-            "scheme separators (':') are not allowed.",
+            f"Invalid output filename prefix {name_prefix!r}: Windows drive "
+            "letters are not allowed.",
             hint=_INVALID_PREFIX_HINT,
         )
     if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in name_prefix):

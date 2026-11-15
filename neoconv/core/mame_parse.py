@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import warnings
 import zipfile
+import zlib
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -645,8 +646,10 @@ def parse_mame_zip(
     UnsupportedRomSetError
         When the ZIP stem names a known encrypted/protected/4-chip-C set.
     InvalidRomLayoutError
-        For unrecognized files (unless allowed), missing/empty P/S/M/V/C, or
-        malformed C chips.
+        For unrecognized files (unless allowed), missing/empty P/S/M/V/C,
+        malformed C chips, duplicate role members, or a ZIP that cannot be
+        opened or whose members cannot be decompressed (corrupt, encrypted, or
+        unsupported compression).
     """
     _reject_unsupported_set(zip_path.stem)
     roles: dict[str, bytes] = {}
@@ -659,15 +662,19 @@ def parse_mame_zip(
                 if entry.is_dir():
                     continue
                 all_names.append(entry.filename)
+                # Read the entry itself, not by name: duplicate member names
+                # would otherwise resolve to a different (usually last) entry.
+                with zf.open(entry) as member:
+                    data = member.read()
                 _ingest_named_rom(
                     entry.filename,
-                    zf.read(entry.filename),
+                    data,
                     roles,
                     c_parts,
                     ignored,
                     diagnostic,
                 )
-    except zipfile.BadZipFile as e:
+    except (zipfile.BadZipFile, zlib.error, RuntimeError) as e:
         raise InvalidRomLayoutError(f"Cannot open ZIP file '{zip_path}': {e}") from e
 
     return _romset_from_collected_roles(
@@ -696,21 +703,39 @@ def read_p_rom_from_zip(zip_path: Path) -> bytes:
     Raises
     ------
     InvalidRomLayoutError
-        When the ZIP cannot be opened or contains no P/P2 member.
+        When the ZIP cannot be opened or a member cannot be decompressed
+        (corrupt, encrypted, or unsupported compression), when a role appears
+        more than once, or when no P/P2 member exists.
     """
     p_parts: list[bytes] = []
     p2_parts: list[bytes] = []
+    p_seen: Optional[str] = None
+    p2_seen: Optional[str] = None
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
             for entry in zf.infolist():
                 if entry.is_dir():
                     continue
                 role = name_to_role(entry.filename)
+                if role not in ("P", "P2"):
+                    continue
+                previous = p_seen if role == "P" else p2_seen
+                if previous is not None:
+                    raise InvalidRomLayoutError(
+                        f"Duplicate {role} ROM in ZIP '{zip_path}': members "
+                        f"'{previous}' and '{entry.filename}' map to the same role."
+                    )
+                # Read this exact entry so duplicate member names cannot be
+                # silently routed through a different one.
+                with zf.open(entry) as member:
+                    data = member.read()
                 if role == "P":
-                    p_parts.append(zf.read(entry.filename))
-                elif role == "P2":
-                    p2_parts.append(zf.read(entry.filename))
-    except zipfile.BadZipFile as e:
+                    p_seen = entry.filename
+                    p_parts.append(data)
+                else:
+                    p2_seen = entry.filename
+                    p2_parts.append(data)
+    except (zipfile.BadZipFile, zlib.error, RuntimeError) as e:
         raise InvalidRomLayoutError(f"Cannot open ZIP file '{zip_path}': {e}") from e
 
     if not p_parts:

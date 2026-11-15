@@ -323,8 +323,10 @@ def write_bytes_atomic(path: Path | str, data: bytes) -> None:
     *path* is used as given: it is never resolved, so a symbolic link at that
     exact path is **replaced as a link** rather than followed, and the link
     target is never modified. Existing regular-file permissions are preserved
-    when replacing; new files get the default mode allowed by the process
-    umask (``0o666`` masked).
+    when replacing where the filesystem supports ``chmod``; the mode copy is
+    best-effort so mode-less mounts (SMB/CIFS, for example) still get the write.
+    New files get the default mode allowed by the process umask (``0o666``
+    masked).
     """
     target = Path(path)
     parent = target.parent
@@ -346,10 +348,15 @@ def write_bytes_atomic(path: Path | str, data: bytes) -> None:
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
         if existing_mode is not None:
-            if hasattr(os, "fchmod"):
-                os.fchmod(fd, existing_mode)
-            else:  # pragma: no cover - Windows has no fchmod
-                os.chmod(tmp, existing_mode)
+            try:
+                if hasattr(os, "fchmod"):
+                    os.fchmod(fd, existing_mode)
+                else:  # pragma: no cover - Windows has no fchmod
+                    os.chmod(tmp, existing_mode)
+            except OSError:
+                # Mode-less filesystems (SMB/CIFS) may reject chmod. Keep the
+                # umask-derived temp mode rather than failing the whole write.
+                pass
         with os.fdopen(fd, "wb") as fh:
             fd = None  # ownership transferred to the file object
             fh.write(data)
