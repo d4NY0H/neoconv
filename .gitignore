@@ -7,6 +7,9 @@ build/
 *.neo
 *.zip
 
+# macOS
+.DS_Store
+
 # pytest / coverage.py
 .coverage
 .coverage.*
