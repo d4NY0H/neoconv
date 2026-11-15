@@ -2408,5 +2408,3 @@ class TestPOnlyZipReader:
         )
         with pytest.raises(InvalidRomLayoutError, match="Duplicate ROM role 'P'"):
             parse_mame_zip(z)
-
-

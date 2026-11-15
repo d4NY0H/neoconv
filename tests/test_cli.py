@@ -1094,5 +1094,3 @@ def test_cli_extract_rejects_traversal_prefix(monkeypatch, tmp_path, capsys):
     assert "Traceback" not in err
     assert not (tmp_path / "evil-p1.bin").exists()
     assert not out_dir.exists()
-
-
