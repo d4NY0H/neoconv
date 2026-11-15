@@ -566,6 +566,23 @@ def test_pack_allow_extra_files_writes_output(monkeypatch, tmp_path):
     assert out.exists()
 
 
+def test_pack_allow_extra_files_still_rejects_rom_like(
+    monkeypatch, tmp_path, capsys
+):
+    roms = tmp_path / "roms"
+    _write_complete_dir(roms)
+    (roms / "202-v9.bin").write_bytes(b"x")
+    out = tmp_path / "out.neo"
+
+    code = _run_pack_cli(monkeypatch, roms, out, "--allow-extra-files")
+
+    assert code == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "202-v9.bin" in err
+    assert "look like Neo Geo ROM data" in err
+
+
 def test_pack_missing_s_fails_leaves_no_output(monkeypatch, tmp_path, capsys):
     roms = tmp_path / "roms"
     _write_complete_dir(roms, include_s=False)

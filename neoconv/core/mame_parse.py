@@ -258,7 +258,7 @@ def _inject_synthetic_s_rom_if_needed(
     allow_synthetic_s: bool,
 ) -> bool:
     """Inject zero-filled S when explicitly allowed. Returns True if injected."""
-    if not allow_synthetic_s or "S" in roles or source_filenames is None:
+    if not allow_synthetic_s or roles.get("S") or source_filenames is None:
         return False
     names = source_filenames
     psm = {r for n in names if (r := pack_psm_role_from_basename(n))}
@@ -271,7 +271,7 @@ def _inject_synthetic_s_rom_if_needed(
         "as a MAME softlist-shaped placeholder because --allow-synthetic-s is "
         "enabled. The resulting .neo is NOT playable on TerraOnion / MiSTer "
         "hardware (missing or corrupt text/fix layer). Prefer a set that ships "
-        "a real s1 (e.g. bootlegs like ms5plus), or repair S from a known-good "
+        "a real s1 (e.g. the svcboot bootleg), or repair S from a known-good "
         ".neo.",
         UserWarning,
         stacklevel=3,
@@ -281,6 +281,38 @@ def _inject_synthetic_s_rom_if_needed(
 
 # Cap long ignored-file lists so layout errors stay readable.
 _MAX_EXTRA_FILES_IN_MESSAGE = 12
+
+# Recognized-but-unmapped ROM naming patterns. ``--allow-extra-files`` must
+# never drop these because doing so can truncate P/V/C data.
+_RE_ROM_ROLE_SUFFIX = re.compile(
+    r"\.(?:p[1-9]|sp[1-9]|ep[0-9a-z]*|s[1-9]|m[1-9]|v[0-9]+|c[0-9]+|neo-sma)$",
+    re.IGNORECASE,
+)
+_RE_ROM_ROLE_IN_STEM = re.compile(
+    r"(?:^|[-_])(?:p[1-9]|sp[1-9]|ep[0-9a-z]*|s[1-9]|m[1-9]|v[0-9]+|c[0-9]+)$",
+    re.IGNORECASE,
+)
+_ROM_DATA_SUFFIXES = frozenset({".bin", ".rom"})
+
+
+def _looks_like_neo_geo_rom(filename: str) -> bool:
+    """
+    True when an *unrecognized* filename still looks like Neo Geo ROM data.
+
+    Used to stop ``--allow-extra-files`` from dropping renamed or truncated
+    ROMs. Only clearly non-ROM extras (README, ``.txt``, ``.dat``, …) may be
+    ignored with that flag.
+    """
+    name = Path(filename).name
+    if _RE_ROM_ROLE_SUFFIX.search(name):
+        return True
+    suffix = Path(name).suffix.lower()
+    if suffix in _ROM_DATA_SUFFIXES:
+        return bool(_RE_ROM_ROLE_IN_STEM.search(Path(name).stem))
+    if not suffix:
+        # Bare MAME prototype names such as ``p1`` / ``v1`` / ``c1``.
+        return bool(_RE_ROM_ROLE_IN_STEM.search(name))
+    return False
 
 
 def _format_file_list(names: list[str]) -> str:
@@ -310,7 +342,8 @@ def roles_to_romset(
     When ``source_filenames`` is provided (ZIP member paths or directory
     basenames), files that do not map to a Neo Geo role are rejected by
     default so they cannot be silently dropped. ``allow_extra_files=True``
-    turns that into a warning.
+    permits clearly non-ROM extras (README, ``.txt``, ``.dat``, …) with a
+    warning; names that still look like ROM data stay hard errors.
 
     Boards without a physical s1 ROM can receive a zero-filled synthetic S
     region matching MAME's ``fixed`` area *size* only when
@@ -334,7 +367,21 @@ def roles_to_romset(
             hint=(
                 "Rename the files to Neo Geo role names (p1/s1/m1/v1/c1…) or "
                 "pass --allow-extra-files (GUI: \"Allow extra files\") to pack "
-                "without them."
+                "without clearly non-ROM extras."
+            ),
+        )
+    rom_like = [name for name in ignored if _looks_like_neo_geo_rom(name)]
+    if rom_like:
+        raise InvalidRomLayoutError(
+            f"Unrecognized file(s) in {source or 'input'} that look like Neo "
+            f"Geo ROM data: {_format_file_list(rom_like)}. "
+            "--allow-extra-files only ignores clearly non-ROM extras; dropping "
+            "these could truncate the program or sprite data, so packing is "
+            "refused.",
+            hint=(
+                "Check the names against the expected p1/p2, s1, m1, v1…, "
+                "c1… roles. Rename/repack them, or remove the extra ROM data "
+                "explicitly; the allow flag cannot override this."
             ),
         )
     if ignored:
@@ -361,11 +408,18 @@ def roles_to_romset(
             names = tuple(source_filenames)
             psm = {r for n in names if (r := pack_psm_role_from_basename(n))}
             if _should_inject_synthetic_s_rom(names, psm):
-                hint = (
-                    "This set has no physical s1 ROM. Pass --allow-synthetic-s "
-                    "(GUI: \"Allow synthetic S\") only if you accept a "
-                    "non-playable zero-filled text layer."
-                )
+                if allow_synthetic_s:
+                    hint = (
+                        "Synthetic S was requested but could not be generated "
+                        "for this input. Check the p1/m1 and c1 file layout "
+                        "instead of enabling the flag again."
+                    )
+                else:
+                    hint = (
+                        "This set has no physical s1 ROM. Pass "
+                        "--allow-synthetic-s (GUI: \"Allow synthetic S\") only "
+                        "if you accept a non-playable zero-filled text layer."
+                    )
         raise InvalidRomLayoutError(
             f"Missing mandatory ROM(s) in {source or 'input'}: "
             f"{', '.join(missing)}. "
@@ -579,8 +633,9 @@ def parse_mame_zip(
     diagnostic : if True, print a warning for every file that was not
                  recognized, so the user can diagnose naming issues.
     allow_extra_files
-                 if True, ignore unrecognized files with a warning instead of
-                 failing. Defaults to False to prevent silent data loss.
+                 if True, ignore clearly non-ROM extras (README, .txt, .dat, …)
+                 with a warning instead of failing. ROM-like extras still
+                 raise. Defaults to False to prevent silent data loss.
     allow_synthetic_s
                  if True, inject a zero-filled S region for MAME boards that
                  have no s1 ROM. Defaults to False (missing S is an error).
@@ -642,8 +697,9 @@ def parse_mame_dir(
     diagnostic : if True, print a warning for every file that was not
                  recognized, so the user can diagnose naming issues.
     allow_extra_files
-                 if True, ignore unrecognized files with a warning instead of
-                 failing. Defaults to False to prevent silent data loss.
+                 if True, ignore clearly non-ROM extras (README, .txt, .dat, …)
+                 with a warning instead of failing. ROM-like extras still
+                 raise. Defaults to False to prevent silent data loss.
     allow_synthetic_s
                  if True, inject a zero-filled S region for MAME boards that
                  have no s1 ROM. Defaults to False (missing S is an error).

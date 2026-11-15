@@ -75,7 +75,10 @@ def test_scan_pack_preflight_synthetic_s_is_off_by_default(tmp_path):
 
 
 def test_pack_tab_opt_in_flags_default_off():
-    root = tk.Tk()
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:  # headless CI / no display
+        pytest.skip(f"Tk display unavailable: {exc}")
     root.withdraw()
     try:
         tab = gui.PackTab(root)

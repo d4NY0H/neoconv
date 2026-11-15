@@ -1411,7 +1411,10 @@ class TestUnsupportedSets:
 
 
 class TestFailClosedPack:
-    def test_samsho_extra_pg2_fails_instead_of_truncating_p(self, tmp_path):
+    @pytest.mark.parametrize("allow_extra", [False, True])
+    def test_samsho_extra_pg2_fails_instead_of_truncating_p(
+        self, tmp_path, allow_extra
+    ):
         z = tmp_path / "samsho_fixture.zip"
         write_role_zip(z, [
             ("045-p1.p1", make_rom(1024, 1)),
@@ -1423,11 +1426,15 @@ class TestFailClosedPack:
             ("045-c2.c2", make_rom(C_BANK_SIZE, 0x22)),
         ])
         with pytest.raises(InvalidRomLayoutError) as exc:
-            parse_mame_zip(z)
+            parse_mame_zip(z, allow_extra_files=allow_extra)
         assert "045-pg2.sp2" in str(exc.value)
-        assert "--allow-extra-files" in (exc.value.hint or "")
+        if allow_extra:
+            assert "look like Neo Geo ROM data" in str(exc.value)
+        else:
+            assert "--allow-extra-files" in (exc.value.hint or "")
 
-    def test_aof2a_extra_epr_fails(self, tmp_path):
+    @pytest.mark.parametrize("allow_extra", [False, True])
+    def test_aof2a_extra_epr_fails(self, tmp_path, allow_extra):
         z = tmp_path / "aof2a_fixture.zip"
         write_role_zip(z, [
             ("056-p1.p1", make_rom(1024, 1)),
@@ -1439,10 +1446,13 @@ class TestFailClosedPack:
             ("056-c2.c2", make_rom(C_BANK_SIZE, 0x22)),
         ])
         with pytest.raises(InvalidRomLayoutError) as exc:
-            parse_mame_zip(z)
+            parse_mame_zip(z, allow_extra_files=allow_extra)
         assert "056-epr.ep1" in str(exc.value)
+        if allow_extra:
+            assert "look like Neo Geo ROM data" in str(exc.value)
 
-    def test_kof99_extra_neo_sma_fails(self, tmp_path):
+    @pytest.mark.parametrize("allow_extra", [False, True])
+    def test_kof99_extra_neo_sma_fails(self, tmp_path, allow_extra):
         z = tmp_path / "kof99_fixture.zip"
         write_role_zip(z, [
             ("251-p1.p1", make_rom(1024, 1)),
@@ -1455,10 +1465,13 @@ class TestFailClosedPack:
             ("ka.neo-sma", make_rom(1024, 6)),
         ])
         with pytest.raises(InvalidRomLayoutError) as exc:
-            parse_mame_zip(z)
+            parse_mame_zip(z, allow_extra_files=allow_extra)
         assert "ka.neo-sma" in str(exc.value)
+        if allow_extra:
+            assert "look like Neo Geo ROM data" in str(exc.value)
 
-    def test_nblktiger_v9_extra_fails(self, tmp_path):
+    @pytest.mark.parametrize("allow_extra", [False, True])
+    def test_nblktiger_v9_extra_fails(self, tmp_path, allow_extra):
         z = tmp_path / "nblktiger_fixture.zip"
         roles = [
             ("202-p1.bin", make_rom(1024, 1)),
@@ -1472,10 +1485,13 @@ class TestFailClosedPack:
         ]
         write_role_zip(z, roles)
         with pytest.raises(InvalidRomLayoutError) as exc:
-            parse_mame_zip(z)
+            parse_mame_zip(z, allow_extra_files=allow_extra)
         assert "202-v9.bin" in str(exc.value)
+        if allow_extra:
+            assert "look like Neo Geo ROM data" in str(exc.value)
 
-    def test_viewpoinp_bare_names_fail(self, tmp_path):
+    @pytest.mark.parametrize("allow_extra", [False, True])
+    def test_viewpoinp_bare_names_fail(self, tmp_path, allow_extra):
         z = tmp_path / "viewpoint_proto_fixture.zip"
         roles = [("p1", b"p"), ("p2", b"p"), ("s1", b"s"), ("m1", b"m")]
         roles += [(f"v{i}", b"v") for i in range(1, 5)]
@@ -1484,7 +1500,7 @@ class TestFailClosedPack:
         ]
         write_role_zip(z, roles)
         with pytest.raises(InvalidRomLayoutError, match="Unrecognized file"):
-            parse_mame_zip(z)
+            parse_mame_zip(z, allow_extra_files=allow_extra)
 
     def test_stakwindev_bare_sp_names_fail(self, tmp_path):
         z = tmp_path / "stakwindev_fixture.zip"
@@ -1606,6 +1622,27 @@ class TestFailClosedPack:
             rs = parse_mame_zip(z, allow_synthetic_s=True)
         assert rs.s == b"\x00" * 0x80000
         assert any("NOT playable" in str(w.message) for w in caught)
+
+    def test_zero_byte_s_is_treated_as_missing_and_can_be_synthesized(
+        self, tmp_path
+    ):
+        z = tmp_path / "zero_byte_s.zip"
+        write_role_zip(z, [
+            ("game-p1.bin", make_rom(1024, 1)),
+            ("game-s1.bin", b""),
+            ("game-m1.bin", make_rom(1024, 3)),
+            ("game-v1.bin", make_rom(1024, 4)),
+            ("game-c1.bin", make_rom(C_BANK_SIZE, 0x11)),
+            ("game-c2.bin", make_rom(C_BANK_SIZE, 0x22)),
+        ])
+        with pytest.raises(InvalidRomLayoutError) as exc:
+            parse_mame_zip(z)
+        assert "Missing mandatory ROM(s)" in str(exc.value)
+        assert "--allow-synthetic-s" in (exc.value.hint or "")
+
+        with pytest.warns(UserWarning, match="No text-layer ROM"):
+            rs = parse_mame_zip(z, allow_synthetic_s=True)
+        assert rs.s == b"\x00" * 0x20000
 
 
 # ---------------------------------------------------------------------------

@@ -16,11 +16,12 @@ Regenerate the list from MAME master ``neogeo.xml`` (307 software entries):
 * ``c-part-layout`` (9): prototype/early 4-chip C layouts (``load32_byte``)
   that the current pairwise interleaver cannot split correctly, including
   ``kotm2p``, ``viewpoinp`` and ``stakwindev``.
-* ``audiocrypt`` (4): ``audiocrypt`` data area without an encryption slot
-  (``kf2k2mp``, ``kf2k2mp2``, ``kof2002b``, ``ms5plus``).
+* ``audiocrypt`` (4): bootleg/re-release sets (``kf2k2mp``, ``kf2k2mp2``,
+  ``kof2002b``, ``ms5plus``) whose M1/V audio is encrypted even though they
+  carry a ``boot_*`` slot.
 
-Total: 67 sets. Bootlegs whose names start with ``boot_`` are intentionally
-not listed; they use standard unencrypted layouts.
+Total: 67 sets. These names are matched exactly; other ``boot_*`` bootlegs
+with standard unencrypted layouts are intentionally not listed.
 """
 
 from __future__ import annotations

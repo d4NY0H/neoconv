@@ -126,8 +126,9 @@ def mame_zip_to_neo(
         Optional ADPCM-B (V2) byte count for the ``.neo`` header. When ``None``
         all V data is written to V1 (legacy layout). Must not exceed total V.
     allow_extra_files
-        If True, unrecognized input files are ignored with a warning instead
-        of raising :class:`InvalidRomLayoutError`.
+        If True, clearly non-ROM extras (README, .txt, .dat, …) are ignored
+        with a warning instead of raising :class:`InvalidRomLayoutError`.
+        ROM-like extras still raise.
     allow_synthetic_s
         If True, a missing s1 ROM may be replaced with a zero-filled
         placeholder. The result is not hardware-playable.
@@ -168,8 +169,9 @@ def mame_dir_to_neo(
         Optional ADPCM-B (V2) byte count for the ``.neo`` header. When ``None``
         all V data is written to V1 (legacy layout). Must not exceed total V.
     allow_extra_files
-        If True, unrecognized input files are ignored with a warning instead
-        of raising :class:`InvalidRomLayoutError`.
+        If True, clearly non-ROM extras (README, .txt, .dat, …) are ignored
+        with a warning instead of raising :class:`InvalidRomLayoutError`.
+        ROM-like extras still raise.
     allow_synthetic_s
         If True, a missing s1 ROM may be replaced with a zero-filled
         placeholder. The result is not hardware-playable.

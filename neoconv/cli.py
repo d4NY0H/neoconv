@@ -483,9 +483,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help=(
-            "Ignore unrecognized files in the input set instead of failing. "
-            "By default they are rejected because dropping them can truncate "
-            "P/V/C data. Use only when you know the extra files are harmless."
+            "Ignore clearly non-ROM extras (README, .txt, .dat, …) instead of "
+            "failing. Files that still look like Neo Geo ROM data remain hard "
+            "errors because dropping them can truncate P/V/C data."
         ),
     )
     p_pack.add_argument(
