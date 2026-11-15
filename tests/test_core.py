@@ -1553,6 +1553,23 @@ class TestFailClosedPack:
         assert len(rs.v) == 128 * 1024
         assert len(rs.c) == 2 * C_BANK_SIZE
 
+    def test_mame_bios_neo_epo_is_allowed_as_extra(self, tmp_path):
+        """``neo-epo.bin`` is a BIOS file, not an EP program-ROM role."""
+        z = tmp_path / "set.zip"
+        write_complete_mame_zip(z, extra=(("neo-epo.bin", b"bios"),))
+        with pytest.warns(UserWarning, match="Ignoring"):
+            rs = parse_mame_zip(z, allow_extra_files=True)
+        assert len(rs.p) == 64 * 1024
+
+    @pytest.mark.parametrize("name", ["game.ep1", "game.epr"])
+    def test_ep_role_extras_remain_rom_like(self, tmp_path, name):
+        z = tmp_path / "set.zip"
+        write_complete_mame_zip(z, extra=((name, make_rom(1024)),))
+        with pytest.raises(
+            InvalidRomLayoutError, match="look like Neo Geo ROM data"
+        ):
+            parse_mame_zip(z, allow_extra_files=True)
+
     def test_extra_file_error_caps_long_list(self, tmp_path):
         extras = tuple((f"junk{i}.bin", b"x") for i in range(20))
         z = tmp_path / "set.zip"

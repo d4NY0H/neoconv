@@ -289,7 +289,7 @@ _RE_ROM_ROLE_SUFFIX = re.compile(
     re.IGNORECASE,
 )
 _RE_ROM_ROLE_IN_STEM = re.compile(
-    r"(?:^|[-_])(?:p[1-9]|sp[1-9]|ep[0-9a-z]*|s[1-9]|m[1-9]|v[0-9]+|c[0-9]+)$",
+    r"(?:^|[-_])(?:p[1-9]|sp[1-9]|ep[0-9]+|epr|s[1-9]|m[1-9]|v[0-9]+|c[0-9]+)$",
     re.IGNORECASE,
 )
 _ROM_DATA_SUFFIXES = frozenset({".bin", ".rom"})
