@@ -46,6 +46,7 @@ def _pack_namespace(src: Path, out: Path, **over) -> argparse.Namespace:
         "screenshot": 0,
         "swap_p": "auto",
         "diagnostic": False,
+        "v2_size": None,
     }
     base.update(over)
     return argparse.Namespace(**base)
@@ -437,7 +438,7 @@ def test_cmd_pack_swap_no_branch(monkeypatch, tmp_path):
     (roms / "f.bin").write_bytes(b"y")
     captured: dict[str, object] = {}
 
-    def _capture(_src, _meta, swap_p=None, diagnostic=False):
+    def _capture(_src, _meta, swap_p=None, diagnostic=False, v2_size=None):
         captured["swap_p"] = swap_p
         captured["diagnostic"] = diagnostic
         return b"neo"
@@ -470,6 +471,85 @@ def test_cmd_pack_unknown_genre_exits(monkeypatch, tmp_path):
     # Verify that _genre_type raises ArgumentTypeError for an unknown genre string.
     with pytest.raises(argparse.ArgumentTypeError):
         cli._genre_type("__bad_genre__")
+
+
+def _patch_pack_romset(monkeypatch, v: bytes = b"V" * 100) -> None:
+    from neoconv.core import RomSet
+
+    romset = RomSet(
+        p=b"P" * 32,
+        s=b"S" * 8,
+        m=b"M" * 8,
+        v=v,
+        c=b"C" * 16,
+    )
+    monkeypatch.setattr(
+        "neoconv.core.pack.parse_mame_dir",
+        lambda _p, diagnostic=False: romset,
+    )
+
+
+def test_cli_pack_v2_size_writes_split_header(monkeypatch, tmp_path):
+    roms = tmp_path / "roms"
+    roms.mkdir()
+    (roms / "dummy.bin").write_bytes(b"x")
+    out = tmp_path / "out.neo"
+    _patch_pack_romset(monkeypatch)
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        [
+            "neoconv", "pack", str(roms), "--swap-p", "no",
+            "--v2-size", "40", "-o", str(out),
+        ],
+    )
+    cli.main()
+    rs = parse_neo(out.read_bytes())
+    assert (rs.v1_size, rs.v2_size) == (60, 40)
+
+
+def test_cli_pack_v2_size_too_large_fails_cleanly(monkeypatch, tmp_path, capsys):
+    roms = tmp_path / "roms"
+    roms.mkdir()
+    (roms / "dummy.bin").write_bytes(b"x")
+    out = tmp_path / "out.neo"
+    _patch_pack_romset(monkeypatch)
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        [
+            "neoconv", "pack", str(roms), "--swap-p", "no",
+            "--v2-size", "200", "-o", str(out),
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "--v2-size" in err
+    assert "exceeds the total V ROM size" in err
+    assert not out.exists()
+
+
+def test_cli_pack_negative_v2_size_fails_cleanly(monkeypatch, tmp_path, capsys):
+    roms = tmp_path / "roms"
+    roms.mkdir()
+    (roms / "dummy.bin").write_bytes(b"x")
+    out = tmp_path / "out.neo"
+    _patch_pack_romset(monkeypatch)
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        [
+            "neoconv", "pack", str(roms), "--swap-p", "no",
+            "--v2-size", "-1", "-o", str(out),
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    assert "must not be negative" in capsys.readouterr().err
+    assert not out.exists()
 
 
 def test_cmd_detect_swap_from_zip(monkeypatch, tmp_path, capsys):

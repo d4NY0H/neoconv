@@ -12,6 +12,12 @@ from .constants import GENRES, NEO_HEADER_SIZE, NEO_MAGIC
 from .exceptions import InvalidNeoError
 from .models import NeoMeta, RomSet
 
+# Fixed-width metadata fields in the 4096-byte header.
+_NAME_OFFSET = 0x2C
+_NAME_SIZE = 33  # 0x2C..0x4C, NUL-terminated
+_MANUFACTURER_OFFSET = 0x4D
+_MANUFACTURER_SIZE = 17  # 0x4D..0x5D, NUL-terminated
+
 
 def _looks_like_legacy_uint16_meta(data: bytes) -> bool:
     """
@@ -103,16 +109,6 @@ def parse_neo(data: bytes) -> RomSet:
             "The .neo file may be corrupt or truncated."
         )
 
-    if v2_size:
-        warnings.warn(
-            "This .neo header splits the V ROM across V1 and V2 size fields "
-            f"(V1={v1_size} bytes, V2={v2_size} bytes). In-memory V data is merged; "
-            "repacking with build_neo or replace_neo_metadata writes a normalised "
-            "header (all V in the V1 field, V2 set to 0).",
-            UserWarning,
-            stacklevel=2,
-        )
-
     offset = NEO_HEADER_SIZE
     p_rom = data[offset : offset + p_size]
     offset += p_size
@@ -127,30 +123,41 @@ def parse_neo(data: bytes) -> RomSet:
         offset += v2_size
     c_rom = data[offset : offset + c_size]
 
-    return RomSet(p=p_rom, s=s_rom, m=m_rom, v=v_rom, c=c_rom, meta=meta)
+    return RomSet(
+        p=p_rom,
+        s=s_rom,
+        m=m_rom,
+        v=v_rom,
+        c=c_rom,
+        meta=meta,
+        v1_size=v1_size,
+        v2_size=v2_size,
+    )
 
 
 def _pack_neo_header(
     p_size: int,
     s_size: int,
     m_size: int,
-    v_total: int,
+    v1_size: int,
+    v2_size: int,
     c_size: int,
     meta: NeoMeta,
 ) -> bytes:
     """
     Serialise the 4096-byte TerraOnion header.
 
-    All V data is recorded in the V1 size field; V2 is always zero (same layout
-    as :func:`build_neo` output).
+    The V1/V2 split is written exactly as supplied. Callers that do not know
+    the split (for example a RomSet assembled from MAME input) must pass
+    ``v1_size=len(V)`` and ``v2_size=0`` — the documented legacy layout.
     """
     header = bytearray(NEO_HEADER_SIZE)
     header[0:4] = NEO_MAGIC
     struct.pack_into("<I", header, 0x04, p_size)
     struct.pack_into("<I", header, 0x08, s_size)
     struct.pack_into("<I", header, 0x0C, m_size)
-    struct.pack_into("<I", header, 0x10, v_total)
-    struct.pack_into("<I", header, 0x14, 0)  # V2 size (merged into V1)
+    struct.pack_into("<I", header, 0x10, v1_size)
+    struct.pack_into("<I", header, 0x14, v2_size)
     struct.pack_into("<I", header, 0x18, c_size)
 
     struct.pack_into("<I", header, 0x1C, meta.year)
@@ -158,22 +165,34 @@ def _pack_neo_header(
     struct.pack_into("<I", header, 0x24, meta.screenshot)
     struct.pack_into("<I", header, 0x28, meta.ngh)
 
-    name_b = meta.name.encode("latin-1", errors="replace")[:32]
-    header[0x2C : 0x2C + len(name_b)] = name_b
-
-    mfr_b = meta.manufacturer.encode("latin-1", errors="replace")[:16]
-    header[0x4D : 0x4D + len(mfr_b)] = mfr_b
+    _write_fixed_field(header, _NAME_OFFSET, _NAME_SIZE, meta.name)
+    _write_fixed_field(header, _MANUFACTURER_OFFSET, _MANUFACTURER_SIZE, meta.manufacturer)
 
     return bytes(header)
 
 
+def _write_fixed_field(header: bytearray, offset: int, size: int, value: str) -> None:
+    """Write a NUL-terminated fixed-width field, clearing any stale tail."""
+    encoded = value.encode("latin-1", errors="replace")[: size - 1]
+    header[offset : offset + size] = encoded.ljust(size, b"\x00")
+
+
 def build_neo(romset: RomSet, meta: NeoMeta) -> bytes:
-    """Pack a RomSet into a .neo binary."""
+    """
+    Pack a RomSet into a .neo binary.
+
+    When ``romset.v1_size``/``v2_size`` are known (typically because the
+    RomSet came from :func:`parse_neo`), the original V1/V2 split is
+    reproduced exactly. Otherwise all V data is written to V1 with V2 = 0
+    (legacy layout).
+    """
+    v1_size, v2_size = romset.v_sizes()
     hdr = _pack_neo_header(
         len(romset.p),
         len(romset.s),
         len(romset.m),
-        len(romset.v),
+        v1_size,
+        v2_size,
         len(romset.c),
         meta,
     )
@@ -195,8 +214,15 @@ def replace_neo_metadata(
 
     Parameters set to ``None`` are left unchanged from *neo_data*.
 
-    Only the 4096-byte header is rebuilt; ROM payload bytes are reused without
-    splitting the file into a :class:`RomSet` (avoids large temporary copies).
+    The existing 4096-byte header is copied and only the requested fields are
+    patched; every other header byte (size fields, V1/V2 split, unknown padding
+    and filler such as ``RMF1`` at 0x100) is preserved byte-for-byte. Payload
+    bytes after the header are reused unchanged.
+
+    One exception is a legacy neoconv header (Year/Genre stored as uint16): the
+    four metadata words at 0x1C..0x2B are migrated to the modern TerraOnion
+    uint32 layout, because patching a mixed layout in place would be ambiguous.
+    All other header bytes are still preserved.
     """
     if len(neo_data) < NEO_HEADER_SIZE:
         raise InvalidNeoError("File too small to be a valid .neo container.")
@@ -219,15 +245,7 @@ def replace_neo_metadata(
             "The .neo file may be corrupt or truncated."
         )
 
-    if v2_size:
-        warnings.warn(
-            "Input .neo has a non-zero V2 ROM size in the header; the rewritten "
-            "header records all V data in the V1 field (V2 set to 0). "
-            "ROM payload bytes after the 4096-byte header are unchanged.",
-            UserWarning,
-            stacklevel=2,
-        )
-
+    legacy_meta = _looks_like_legacy_uint16_meta(neo_data)
     meta = _meta_from_neo_header_prefix(neo_data)
     if name is not None:
         meta.name = name
@@ -242,9 +260,30 @@ def replace_neo_metadata(
     if screenshot is not None:
         meta.screenshot = screenshot
 
-    v_total = v1_size + v2_size
-    hdr = _pack_neo_header(p_size, s_size, m_size, v_total, c_size, meta)
-    return hdr + neo_data[NEO_HEADER_SIZE:]
+    header = bytearray(neo_data[:NEO_HEADER_SIZE])
+
+    if legacy_meta:
+        # Migrate the whole metadata block so the result uses one consistent layout.
+        struct.pack_into("<I", header, 0x1C, meta.year)
+        struct.pack_into("<I", header, 0x20, meta.genre)
+        struct.pack_into("<I", header, 0x24, meta.screenshot)
+        struct.pack_into("<I", header, 0x28, meta.ngh)
+    else:
+        if year is not None:
+            struct.pack_into("<I", header, 0x1C, meta.year)
+        if genre is not None:
+            struct.pack_into("<I", header, 0x20, meta.genre)
+        if screenshot is not None:
+            struct.pack_into("<I", header, 0x24, meta.screenshot)
+        if ngh is not None:
+            struct.pack_into("<I", header, 0x28, meta.ngh)
+
+    if name is not None:
+        _write_fixed_field(header, _NAME_OFFSET, _NAME_SIZE, meta.name)
+    if manufacturer is not None:
+        _write_fixed_field(header, _MANUFACTURER_OFFSET, _MANUFACTURER_SIZE, meta.manufacturer)
+
+    return bytes(header) + neo_data[NEO_HEADER_SIZE:]
 
 
 def write_bytes_atomic(path: Path | str, data: bytes) -> None:

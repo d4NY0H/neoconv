@@ -73,12 +73,41 @@ def apply_swap_p(
     return romset
 
 
+def _apply_v2_size(romset: RomSet, v2_size: int | None) -> RomSet:
+    """
+    Record an explicit V1/V2 split on *romset* for ``.neo`` header writing.
+
+    ``v2_size=None`` keeps the RomSet unchanged (legacy layout: all V in V1).
+    Automatic ADPCM-B classification needs the deferred layout/softlist work,
+    so the split is passed explicitly by the caller.
+    """
+    if v2_size is None:
+        return romset
+    if v2_size < 0:
+        raise InvalidConfigurationError(
+            f"--v2-size must not be negative (got {v2_size:,}).",
+            hint="Use 0 for a single ADPCM-A bank, or the ADPCM-B byte count.",
+        )
+    if v2_size > len(romset.v):
+        raise InvalidConfigurationError(
+            f"--v2-size ({v2_size:,} bytes) exceeds the total V ROM size "
+            f"({len(romset.v):,} bytes).",
+            hint="The V1 and V2 sizes must add up to the total V data length.",
+        )
+    return replace(
+        romset,
+        v1_size=len(romset.v) - v2_size,
+        v2_size=v2_size,
+    )
+
+
 def mame_zip_to_neo(
     zip_path: Path,
     meta: NeoMeta,
     swap_p: SwapMode = SwapMode.NO,
     diagnostic: bool = False,
     swap_verbose: bool = True,
+    v2_size: int | None = None,
 ) -> bytes:
     """Convert a MAME ROM zip to a .neo binary.
 
@@ -90,9 +119,13 @@ def mame_zip_to_neo(
         The CLI ``pack`` subcommand and GUI pass ``SwapMode.AUTO`` by default.
     swap_verbose
         If True (default), print auto-detect diagnostics for ``SwapMode.AUTO``.
+    v2_size
+        Optional ADPCM-B (V2) byte count for the ``.neo`` header. When ``None``
+        all V data is written to V1 (legacy layout). Must not exceed total V.
     """
     romset = parse_mame_zip(zip_path, diagnostic=diagnostic)
     romset = apply_swap_p(romset, swap_p, verbose=swap_verbose)
+    romset = _apply_v2_size(romset, v2_size)
     return build_neo(romset, meta)
 
 
@@ -102,6 +135,7 @@ def mame_dir_to_neo(
     swap_p: SwapMode = SwapMode.NO,
     diagnostic: bool = False,
     swap_verbose: bool = True,
+    v2_size: int | None = None,
 ) -> bytes:
     """Convert a directory of MAME ROM files to a .neo binary.
 
@@ -113,7 +147,11 @@ def mame_dir_to_neo(
         The CLI ``pack`` subcommand and GUI pass ``SwapMode.AUTO`` by default.
     swap_verbose
         If True (default), print auto-detect diagnostics for ``SwapMode.AUTO``.
+    v2_size
+        Optional ADPCM-B (V2) byte count for the ``.neo`` header. When ``None``
+        all V data is written to V1 (legacy layout). Must not exceed total V.
     """
     romset = parse_mame_dir(dir_path, diagnostic=diagnostic)
     romset = apply_swap_p(romset, swap_p, verbose=swap_verbose)
+    romset = _apply_v2_size(romset, v2_size)
     return build_neo(romset, meta)

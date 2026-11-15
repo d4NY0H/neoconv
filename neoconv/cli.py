@@ -247,10 +247,22 @@ def cmd_pack(args: argparse.Namespace) -> None:
 
     if src.is_dir():
         print(f"Packing directory: {src}")
-        neo_data = mame_dir_to_neo(src, meta, swap_p=swap_p, diagnostic=args.diagnostic)
+        neo_data = mame_dir_to_neo(
+            src,
+            meta,
+            swap_p=swap_p,
+            diagnostic=args.diagnostic,
+            v2_size=getattr(args, "v2_size", None),
+        )
     elif zipfile.is_zipfile(src):
         print(f"Packing ZIP: {src}")
-        neo_data = mame_zip_to_neo(src, meta, swap_p=swap_p, diagnostic=args.diagnostic)
+        neo_data = mame_zip_to_neo(
+            src,
+            meta,
+            swap_p=swap_p,
+            diagnostic=args.diagnostic,
+            v2_size=getattr(args, "v2_size", None),
+        )
     else:
         print(f"Error: input must be a directory or ZIP file.", file=sys.stderr)
         sys.exit(1)
@@ -456,6 +468,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_pack.add_argument(
         "--diagnostic", action="store_true", default=False,
         help="Print a warning for every file that was not recognized, to help diagnose naming issues."
+    )
+    p_pack.add_argument(
+        "--v2-size",
+        type=int,
+        default=None,
+        metavar="BYTES",
+        help=(
+            "ADPCM-B (V2) size in bytes for the .neo header. Use when the MAME "
+            "set has a separate ADPCM-B bank; V1 is derived as total V minus this "
+            "value. Omit to write all V data to V1 with V2 = 0. Must not exceed "
+            "the total V size. Automatic ADPCM-B detection is not implemented."
+        ),
     )
     p_pack.set_defaults(func=cmd_pack)
 

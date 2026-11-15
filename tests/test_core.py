@@ -7,6 +7,7 @@ Run with:  python -m pytest tests/ -v
 import hashlib
 import io
 import struct
+import warnings
 import zipfile
 from pathlib import Path
 
@@ -82,6 +83,41 @@ def make_neo(romset: RomSet, meta: NeoMeta | None = None) -> bytes:
     if meta is None:
         meta = NeoMeta(name="Test", manufacturer="SNK", year=1994, ngh=42)
     return build_neo(romset, meta)
+
+
+def make_neo_with_v2_split(
+    *,
+    v1: bytes = b"AAA",
+    v2: bytes = b"bb",
+    name: str = "SplitGame",
+    manufacturer: str = "SNK",
+) -> bytes:
+    """
+    Build a small .neo whose header splits V across V1/V2 and carries unknown
+    filler bytes (``RMF1`` at 0x100, arbitrary padding at 0x200).
+
+    Real TerraOnion headers are not fully zero-filled; this fixture guards
+    against code that rebuilds the header from scratch.
+    """
+    h = bytearray(NEO_HEADER_SIZE)
+    h[0:4] = NEO_MAGIC
+    struct.pack_into("<I", h, 0x04, 0)
+    struct.pack_into("<I", h, 0x08, 0)
+    struct.pack_into("<I", h, 0x0C, 0)
+    struct.pack_into("<I", h, 0x10, len(v1))
+    struct.pack_into("<I", h, 0x14, len(v2))
+    struct.pack_into("<I", h, 0x18, 0)
+    struct.pack_into("<I", h, 0x1C, 1999)
+    struct.pack_into("<I", h, 0x20, 9)
+    struct.pack_into("<I", h, 0x24, 7)
+    struct.pack_into("<I", h, 0x28, 42)
+    name_b = name.encode("latin-1")
+    h[0x2C : 0x2C + len(name_b)] = name_b
+    mfr_b = manufacturer.encode("latin-1")
+    h[0x4D : 0x4D + len(mfr_b)] = mfr_b
+    h[0x100:0x104] = b"RMF1"
+    h[0x200:0x210] = bytes(range(0x10))
+    return bytes(h) + v1 + v2
 
 
 # ---------------------------------------------------------------------------
@@ -526,24 +562,49 @@ class TestBuildParseNeo:
         with pytest.raises(InvalidNeoError, match="too small"):
             parse_neo(data)
 
-    def test_parse_neo_appends_optional_v2_region(self):
-        """Header may split V data across v1_size and v2_size (uncommon but supported)."""
-        h = bytearray(NEO_HEADER_SIZE)
-        h[0:4] = NEO_MAGIC
-        struct.pack_into("<I", h, 0x04, 0)
-        struct.pack_into("<I", h, 0x08, 0)
-        struct.pack_into("<I", h, 0x0C, 0)
-        struct.pack_into("<I", h, 0x10, 3)
-        struct.pack_into("<I", h, 0x14, 2)
-        struct.pack_into("<I", h, 0x18, 0)
-        struct.pack_into("<I", h, 0x1C, 1999)
-        struct.pack_into("<I", h, 0x20, 0)
-        struct.pack_into("<I", h, 0x24, 0)
-        struct.pack_into("<I", h, 0x28, 0)
-        neo = bytes(h) + b"AAA" + b"bb"
-        with pytest.warns(UserWarning, match="splits the V ROM"):
+    def test_parse_neo_preserves_v1_v2_sizes(self):
+        """Header V1/V2 split is merged for callers but retained on the RomSet."""
+        neo = make_neo_with_v2_split()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
             rs = parse_neo(neo)
         assert rs.v == b"AAAbb"
+        assert rs.v1_size == 3
+        assert rs.v2_size == 2
+        assert rs.v_sizes() == (3, 2)
+
+    def test_parse_build_roundtrip_preserves_v_split(self):
+        neo = make_neo_with_v2_split()
+        rs = parse_neo(neo)
+        rebuilt = build_neo(rs, rs.meta)
+        assert struct.unpack_from("<I", rebuilt, 0x10)[0] == 3
+        assert struct.unpack_from("<I", rebuilt, 0x14)[0] == 2
+        assert rebuilt[NEO_HEADER_SIZE:] == neo[NEO_HEADER_SIZE:]
+
+    def test_build_neo_unknown_v_split_uses_legacy_layout(self):
+        """RomSets built from MAME input have no original split; V2 stays 0."""
+        rs = RomSet(v=b"x" * 10)
+        neo = build_neo(rs, NeoMeta())
+        assert struct.unpack_from("<I", neo, 0x10)[0] == 10
+        assert struct.unpack_from("<I", neo, 0x14)[0] == 0
+
+    def test_build_neo_explicit_zero_v2(self):
+        rs = RomSet(v=b"x" * 10, v1_size=10, v2_size=0)
+        neo = build_neo(rs, NeoMeta())
+        assert struct.unpack_from("<I", neo, 0x10)[0] == 10
+        assert struct.unpack_from("<I", neo, 0x14)[0] == 0
+
+    def test_romset_rejects_v_sizes_that_do_not_sum_to_v(self):
+        with pytest.raises(InvalidConfigurationError, match="does not match the V ROM size"):
+            RomSet(v=b"abc", v1_size=2, v2_size=2)
+
+    def test_romset_rejects_negative_v_sizes(self):
+        with pytest.raises(InvalidConfigurationError, match="must not be negative"):
+            RomSet(v=b"abc", v1_size=-1, v2_size=4)
+
+    def test_romset_rejects_v2_without_v1(self):
+        with pytest.raises(InvalidConfigurationError, match="V1 size is unknown"):
+            RomSet(v=b"abc", v2_size=3)
 
 
 # ---------------------------------------------------------------------------
@@ -620,35 +681,72 @@ class TestNeoMetadataEdit:
         )
         assert new == ref
 
-    def test_replace_neo_metadata_split_v_header_matches_build_neo(self):
-        """Rare V1/V2 split in header must match parse+build reference output."""
-        h = bytearray(NEO_HEADER_SIZE)
-        h[0:4] = NEO_MAGIC
-        struct.pack_into("<I", h, 0x04, 0)
-        struct.pack_into("<I", h, 0x08, 0)
-        struct.pack_into("<I", h, 0x0C, 0)
-        struct.pack_into("<I", h, 0x10, 3)
-        struct.pack_into("<I", h, 0x14, 2)
-        struct.pack_into("<I", h, 0x18, 0)
-        struct.pack_into("<I", h, 0x1C, 1999)
-        struct.pack_into("<I", h, 0x20, 0)
-        struct.pack_into("<I", h, 0x24, 0)
-        struct.pack_into("<I", h, 0x28, 0)
-        neo = bytes(h) + b"AAA" + b"bb"
-        with pytest.warns(UserWarning, match="splits the V ROM"):
-            rs = parse_neo(neo)
-        meta2 = NeoMeta(
-            name=rs.meta.name,
-            manufacturer=rs.meta.manufacturer,
-            year=3333,
-            genre=rs.meta.genre,
-            screenshot=rs.meta.screenshot,
-            ngh=rs.meta.ngh,
+    def test_edit_preserves_untouched_header_bytes_and_payload(self):
+        neo = make_neo_with_v2_split()
+        new = replace_neo_metadata(neo, name="NewName", year=2001)
+
+        # Payload after the header must be byte-identical.
+        assert new[NEO_HEADER_SIZE:] == neo[NEO_HEADER_SIZE:]
+        assert hashlib.md5(new[NEO_HEADER_SIZE:]).hexdigest() == hashlib.md5(
+            neo[NEO_HEADER_SIZE:]
+        ).hexdigest()
+
+        # Unknown header filler and padding survive.
+        assert new[0x100:0x104] == b"RMF1"
+        assert new[0x200:0x210] == bytes(range(0x10))
+
+        # V1/V2 split survives.
+        assert struct.unpack_from("<I", new, 0x10)[0] == 3
+        assert struct.unpack_from("<I", new, 0x14)[0] == 2
+
+        # Only the requested fields change.
+        changed = {i for i in range(NEO_HEADER_SIZE) if neo[i] != new[i]}
+        assert changed <= set(range(0x1C, 0x20)) | set(range(0x2C, 0x4D))
+
+        parsed = parse_neo(new)
+        assert parsed.meta.name == "NewName"
+        assert parsed.meta.year == 2001
+        assert parsed.meta.genre == 9
+        assert parsed.meta.screenshot == 7
+        assert parsed.meta.ngh == 42
+        assert (parsed.v1_size, parsed.v2_size) == (3, 2)
+
+    def test_edit_does_not_warn_about_v2(self):
+        neo = make_neo_with_v2_split()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            replace_neo_metadata(neo, name="Quiet")
+
+    def test_edit_clears_stale_name_and_manufacturer_tail(self):
+        neo = make_neo_with_v2_split(
+            name="AVeryLongOriginalName",
+            manufacturer="LongManufacturer",
         )
-        ref = build_neo(rs, meta2)
-        with pytest.warns(UserWarning, match="non-zero V2"):
-            new = replace_neo_metadata(neo, year=3333)
-        assert new == ref
+        new = replace_neo_metadata(neo, name="X", manufacturer="Y")
+        assert new[0x2C:0x4D] == b"X" + b"\x00" * 32
+        assert new[0x4D:0x5E] == b"Y" + b"\x00" * 16
+        assert new[NEO_HEADER_SIZE:] == neo[NEO_HEADER_SIZE:]
+
+    def test_edit_without_metadata_overrides_returns_input(self):
+        neo = make_neo_with_v2_split()
+        assert replace_neo_metadata(neo) == neo
+
+    def test_replace_neo_metadata_preserves_split_v_header(self):
+        """A V1/V2 split in the header must survive an edit unchanged."""
+        neo = make_neo_with_v2_split()
+        new = replace_neo_metadata(neo, year=3333)
+        assert struct.unpack_from("<I", new, 0x10)[0] == 3
+        assert struct.unpack_from("<I", new, 0x14)[0] == 2
+        assert replace_neo_metadata(neo, year=3333)[NEO_HEADER_SIZE:] == neo[
+            NEO_HEADER_SIZE:
+        ]
+        # parse -> build reproduces the split and payload, even though build_neo
+        # legitimately zero-fills unknown header padding.
+        parsed = parse_neo(new)
+        rebuilt = build_neo(parsed, parsed.meta)
+        assert struct.unpack_from("<I", rebuilt, 0x10)[0] == 3
+        assert struct.unpack_from("<I", rebuilt, 0x14)[0] == 2
+        assert rebuilt[NEO_HEADER_SIZE:] == new[NEO_HEADER_SIZE:]
 
     def test_write_bytes_atomic(self, tmp_path):
         p = tmp_path / "out.neo"
@@ -1089,6 +1187,16 @@ class TestNeoMetaFormatInfo:
         assert hashlib.md5(rs.m).hexdigest() in info
         assert hashlib.md5(rs.v).hexdigest() in info
         assert hashlib.md5(rs.c).hexdigest() in info
+
+    def test_with_split_v_romset_shows_split(self):
+        rs = parse_neo(make_neo_with_v2_split())
+        info = NeoMeta().format_info(rs)
+        assert "V ROM split" in info
+        assert "V1 3 bytes (ADPCM-A) + V2 2 bytes (ADPCM-B)" in info
+
+    def test_without_v2_omits_split_line(self):
+        rs = make_romset()
+        assert "V ROM split" not in NeoMeta().format_info(rs)
 
     def test_all_genres_present(self):
         for genre_id, genre_name in GENRES.items():
