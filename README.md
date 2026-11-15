@@ -48,6 +48,8 @@ neoconv is **broad but fail-closed**: when it cannot prove that a set will be pa
 | Missing or empty V / C regions | ❌ Rejected | A `.neo` is never built with an empty audio or sprite region |
 | Set without a physical `s1` | ❌ Rejected by default | `--allow-synthetic-s` opts in to a zero-filled S placeholder that is **not playable** on hardware |
 
+**Limitation:** the unsupported-set gate matches the ZIP stem or directory name. Renaming a set/ZIP can bypass it until content-based detection and the layout engine land; keep set names intact or use a known-good `.neo`.
+
 ---
 
 ## Feature parity: CLI and GUI
@@ -61,6 +63,7 @@ Both interfaces support the same core workflows:
 | Edit `.neo` header metadata (no repack) | ✅ | ✅ |
 | View `.neo` metadata, region sizes, and per-region MD5 | ✅ | ✅ |
 | P-ROM bank swap (auto-detect + manual override) | ✅ | ✅ |
+| Explicit ADPCM-B (V2) split via `--v2-size` | ✅ | ✅ *(Pack Options → **V2 (ADPCM-B) size**)* |
 | Standalone `detect-swap` (inspect P-ROM without packing) | ✅ | — *(Pack with **Auto-detect** logs the same check in the GUI)* |
 | Diagnostic mode for unrecognized files | ✅ | ✅ |
 
@@ -180,7 +183,7 @@ Tabs:
 
 | Tab | Description |
 |-----|-------------|
-| **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap via radio (`auto` / `yes` / `no`). Status line checks mandatory P/S/M roles and warns on **V/C filename gaps** before pack |
+| **Pack** | Build `.neo` from ZIP/folder with metadata; P-ROM swap via radio (`auto` / `yes` / `no`); optional **V2 (ADPCM-B) size** in bytes (blank = all V data in V1). Status line checks mandatory P/S/M roles and warns on **V/C filename gaps** before pack |
 | **Extract** | Convert `.neo` to MAME or Darksoft ZIP/directory; **P / C / V** size dropdowns plus optional comma-separated size lists for mixed/multi-chip sets (same grammar as CLI). P default keeps one `p1` |
 | **Edit** | Load header fields from a `.neo`, adjust metadata (name/manufacturer truncated to header limits), write back (optional separate output path) |
 | **Info** | Inspect metadata, ROM region sizes, and **MD5 per region** (P, S, M, V, C) |
@@ -437,7 +440,7 @@ To get a playable file for those parents today: start from a **known-good** `.ne
 
 #### FBNeo compatibility
 
-FBNeo Neo Geo sets use the same ROM naming conventions as MAME and are supported out of the box. BIOS-related files (`000-lo.lo`, `sfix.sfix`, `sm1.sm1`, `sp-s2.sp1`, etc.) are ignored automatically.
+FBNeo Neo Geo sets use the same ROM naming conventions as MAME and standard sets are supported out of the box. Known BIOS files from an explicit allowlist (`000-lo.lo`, `sfix.sfix`, `sm1.sm1`, `sp-s2.sp1`, `uni-bios_*.rom`, …) are ignored automatically and cannot override the game's real `m1`. Any other unrecognized file fails by default unless it is a clearly non-ROM extra allowed with `--allow-extra-files`.
 
 Sets where C-chip filenames carry a suffix in the **stem** but use native extensions (e.g. `263-c1d.c1`, `269-c1r.c1`, `268-c1c.c1`) are recognised correctly — the extension `.c1` / `.c2` match takes priority.
 
@@ -598,7 +601,7 @@ For hacks and CD conversions, MAME `verifyroms` may report CRC mismatches becaus
 - **`detect-swap` on `.neo` files:** not useful — the P-ROM swap is applied during `pack` and already encoded in the `.neo` payload. There is nothing left to detect.
 - **`verify` CLI subcommand:** `verify_roundtrip` exists in `neoconv.core` as a testing utility. Exposing it as a CLI command would only confirm that neoconv round-trips its own output correctly, which is covered by the test suite. It is not a user-facing feature.
 - **Directory traversal deeper than one level** in `pack`: the one-level limit (top-level files + one subdirectory) covers all known MAME unzip layouts. Recursive traversal would risk picking up unrelated files from nested archives or build artefacts.
-- **FBNeo as a separate input format:** FBNeo Neo Geo sets use the same naming conventions as MAME and are supported out of the box — see [FBNeo compatibility](#fbneo-compatibility).
+- **FBNeo as a separate input format:** FBNeo Neo Geo sets use the same naming conventions as MAME and standard sets are supported out of the box — see [FBNeo compatibility](#fbneo-compatibility).
 - **Deriving real s1 / text-layer tiles from C-ROM** for PVC parents (and CLI/`--s1` injection from a reference `.neo`): not supported yet — see [Synthetic S-ROM](#synthetic-s-rom-no-physical-s1).
 #### Legacy neoconv headers (Year/Genre as uint16)
 

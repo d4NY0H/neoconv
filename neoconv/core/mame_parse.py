@@ -286,14 +286,48 @@ _MAX_EXTRA_FILES_IN_MESSAGE = 12
 # Recognized-but-unmapped ROM naming patterns. ``--allow-extra-files`` must
 # never drop these because doing so can truncate P/V/C data.
 _RE_ROM_ROLE_SUFFIX = re.compile(
-    r"\.(?:p[1-9]|sp[1-9]|ep[0-9a-z]*|s[1-9]|m[1-9]|v[0-9]+|c[0-9]+|neo-sma)$",
+    r"\.(?:p[0-9]+[a-z]*|sp[0-9]+[a-z]*|ep[0-9a-z]*|s[1-9]|m[1-9]|v[0-9]+|c[0-9]+[a-z]*|neo-sma)$",
     re.IGNORECASE,
 )
 _RE_ROM_ROLE_IN_STEM = re.compile(
-    r"(?:^|[-_])(?:p[1-9]|sp[1-9]|ep[0-9]+|epr|s[1-9]|m[1-9]|v[0-9]+|c[0-9]+)$",
+    r"(?:^|[-_])(?:p[0-9]+[a-z]*|sp[0-9]+[a-z]*|ep[0-9]+|epr|s[1-9]|m[1-9]|v[0-9]+|c[0-9]+[a-z]*)$",
     re.IGNORECASE,
 )
 _ROM_DATA_SUFFIXES = frozenset({".bin", ".rom"})
+
+# BIOS files that may sit beside a MAME/FBNeo set. They are ignored before
+# role classification so e.g. ``sm1.sm1`` cannot be mistaken for the game M ROM.
+_KNOWN_BIOS_FILES = frozenset({
+    "000-lo.lo",
+    "sfix.sfix",
+    "sm1.sm1",
+    "sp-s2.sp1",
+    "sp-s.sp1",
+    "sp-45.sp1",
+    "sp-s3.sp1",
+    "sp-u2.sp1",
+    "sp-e.sp1",
+    "sp1-u2",
+    "sp1-u4.bin",
+    "sp1-u3.bin",
+    "vs-bios.rom",
+    "sp-j2.sp1",
+    "sp1.jipan.1024",
+    "japan-j3.bin",
+    "sp1-j3.bin",
+    "sp-j3.sp1",
+    "sp-1v1_3db8c.bin",
+    "asia-s3.rom",
+    "neo-epo.bin",
+})
+_RE_UNI_BIOS_ROM = re.compile(r"^uni-bios_.*\.rom$", re.IGNORECASE)
+
+
+def is_known_bios_file(filename: str) -> bool:
+    """True when *filename* is a known Neo Geo BIOS file (case-insensitive)."""
+    name = Path(filename).name.lower()
+    return name in _KNOWN_BIOS_FILES or bool(_RE_UNI_BIOS_ROM.match(name))
+
 
 # MAME ADPCM-A/B V-chip naming (``001-v11.v11`` / ``001-v21.v21``). These are
 # flattened 16-bit V-ROM layouts, not the standard byte-wide v1..v8 chips, and
@@ -709,7 +743,7 @@ def parse_mame_zip(
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
             for entry in zf.infolist():
-                if entry.is_dir():
+                if entry.is_dir() or is_known_bios_file(entry.filename):
                     continue
                 all_names.append(entry.filename)
                 # Read the entry itself, not by name: duplicate member names
@@ -834,12 +868,14 @@ def parse_mame_dir(
         For unrecognized files (unless allowed), missing/empty P/S/M/V/C, or
         malformed C chips.
     """
-    _reject_unsupported_set(dir_path.name)
+    _reject_unsupported_set(dir_path.resolve().name)
     roles: dict[str, bytes] = {}
     c_parts: dict[str, dict[str, bytes]] = {}
     ignored: list[str] = []
     all_names: list[str] = []
     for f in iter_mame_dir_rom_files(dir_path):
+        if is_known_bios_file(f.name):
+            continue
         all_names.append(f.name)
         _ingest_named_rom(f.name, f.read_bytes(), roles, c_parts, ignored, diagnostic)
 

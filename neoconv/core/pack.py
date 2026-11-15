@@ -73,7 +73,7 @@ def apply_swap_p(
     return romset
 
 
-def _apply_v2_size(romset: RomSet, v2_size: int | None) -> RomSet:
+def apply_v2_size(romset: RomSet, v2_size: int | None) -> RomSet:
     """
     Record an explicit V1/V2 split on *romset* for ``.neo`` header writing.
 
@@ -140,7 +140,7 @@ def mame_zip_to_neo(
         allow_synthetic_s=allow_synthetic_s,
     )
     romset = apply_swap_p(romset, swap_p, verbose=swap_verbose)
-    romset = _apply_v2_size(romset, v2_size)
+    romset = apply_v2_size(romset, v2_size)
     return build_neo(romset, meta)
 
 
@@ -183,5 +183,5 @@ def mame_dir_to_neo(
         allow_synthetic_s=allow_synthetic_s,
     )
     romset = apply_swap_p(romset, swap_p, verbose=swap_verbose)
-    romset = _apply_v2_size(romset, v2_size)
+    romset = apply_v2_size(romset, v2_size)
     return build_neo(romset, meta)

@@ -1367,16 +1367,16 @@ class TestDiagnosticMode:
         (tmp_path / "game-c1.bin").write_bytes(make_rom(C_BANK_SIZE))
         (tmp_path / "game-c2.bin").write_bytes(make_rom(C_BANK_SIZE))
         (tmp_path / "readme.txt").write_bytes(b"hello")       # unrecognized
-        (tmp_path / "000-lo.lo").write_bytes(make_rom(128 * 1024))  # unrecognized
+        (tmp_path / "000-lo.lo").write_bytes(make_rom(128 * 1024))  # known BIOS
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             parse_mame_dir(tmp_path, diagnostic=True, allow_extra_files=True)
 
         warned_names = [str(w.message) for w in caught]
-        # Both unrecognized files should produce warnings
+        # Only the truly unrecognized file warns; known BIOS files are skipped.
         assert any("readme.txt" in m for m in warned_names)
-        assert any("000-lo.lo" in m for m in warned_names)
+        assert not any("000-lo.lo" in m for m in warned_names)
 
     def test_no_warnings_without_diagnostic(self, tmp_path):
         import warnings
@@ -1459,6 +1459,15 @@ class TestUnsupportedSets:
         d.mkdir()
         with pytest.raises(UnsupportedRomSetError, match="kotm2p"):
             parse_mame_dir(d)
+
+    def test_blocked_directory_dot_path_resolves_real_name(
+        self, tmp_path, monkeypatch
+    ):
+        d = tmp_path / "mslug5"
+        d.mkdir()
+        monkeypatch.chdir(d)
+        with pytest.raises(UnsupportedRomSetError, match="mslug5"):
+            parse_mame_dir(Path("."))
 
     def test_boot_legacy_names_are_not_blocked(self, tmp_path):
         d = tmp_path / "boot_mslug5"
@@ -1585,6 +1594,74 @@ class TestFailClosedPack:
         assert "ADPCM-A/B" in msg
         assert "v1..v8" in (exc.value.hint or "")
 
+    @pytest.mark.parametrize(
+        "name", ["orochi-p21.bin", "lnsq-p21.bin", "5006-p2a.bin"]
+    )
+    def test_allow_extra_files_rejects_multidigit_p_names(self, tmp_path, name):
+        """Multi-digit/letter P names are real P data, not disposable extras."""
+        z = tmp_path / "multi_p_fixture.zip"
+        write_complete_mame_zip(z, extra=((name, make_rom(1024, 0x66)),))
+        with pytest.raises(
+            InvalidRomLayoutError, match="look like Neo Geo ROM data"
+        ) as exc:
+            parse_mame_zip(z, allow_extra_files=True)
+        assert name in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "bios_name",
+        [
+            "000-lo.lo",
+            "sfix.sfix",
+            "sm1.sm1",
+            "sp-s2.sp1",
+            "sp1-u4.bin",
+            "uni-bios_4_0.rom",
+            "neo-epo.bin",
+        ],
+    )
+    def test_known_bios_extras_pack_without_allow_flag_zip(
+        self, tmp_path, bios_name
+    ):
+        z = tmp_path / "bios_fixture.zip"
+        write_complete_mame_zip(z, extra=((bios_name, b"bios"),))
+        rs = parse_mame_zip(z)
+        assert rs.m == make_rom(128 * 1024)
+
+    def test_known_bios_extras_pack_without_allow_flag_dir(self, tmp_path):
+        (tmp_path / "game-p1.bin").write_bytes(make_rom(64 * 1024))
+        (tmp_path / "game-s1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-m1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-v1.bin").write_bytes(make_rom(128 * 1024))
+        (tmp_path / "game-c1.bin").write_bytes(make_rom(C_BANK_SIZE))
+        (tmp_path / "game-c2.bin").write_bytes(make_rom(C_BANK_SIZE))
+        for bios_name in ("000-lo.lo", "sfix.sfix", "sm1.sm1", "sp-s2.sp1"):
+            (tmp_path / bios_name).write_bytes(b"bios")
+        rs = parse_mame_dir(tmp_path)
+        assert rs.m == make_rom(128 * 1024)
+
+    def test_bios_sm1_does_not_override_real_m1(self, tmp_path):
+        z = tmp_path / "sm1_first.zip"
+        real_m = make_rom(128 * 1024, 0x5A)
+        write_role_zip(z, [
+            ("sm1.sm1", make_rom(1024, 0x99)),
+            ("game-p1.bin", make_rom(64 * 1024)),
+            ("game-s1.bin", make_rom(128 * 1024)),
+            ("game-m1.bin", real_m),
+            ("game-v1.bin", make_rom(128 * 1024)),
+            ("game-c1.bin", make_rom(C_BANK_SIZE)),
+            ("game-c2.bin", make_rom(C_BANK_SIZE)),
+        ])
+        assert parse_mame_zip(z).m == real_m
+
+    def test_unknown_readme_still_fails_despite_bios_allowlist(self, tmp_path):
+        z = tmp_path / "bios_and_readme.zip"
+        write_complete_mame_zip(
+            z,
+            extra=(("000-lo.lo", b"bios"), ("readme.txt", b"x")),
+        )
+        with pytest.raises(InvalidRomLayoutError, match="readme.txt"):
+            parse_mame_zip(z)
+
     def test_extra_file_fails_by_default(self, tmp_path):
         z = tmp_path / "set.zip"
         write_complete_mame_zip(z, extra=(("readme.txt", b"x"),))
@@ -1623,12 +1700,11 @@ class TestFailClosedPack:
         assert len(rs.v) == 128 * 1024
         assert len(rs.c) == 2 * C_BANK_SIZE
 
-    def test_mame_bios_neo_epo_is_allowed_as_extra(self, tmp_path):
+    def test_mame_bios_neo_epo_is_silently_ignored(self, tmp_path):
         """``neo-epo.bin`` is a BIOS file, not an EP program-ROM role."""
         z = tmp_path / "set.zip"
         write_complete_mame_zip(z, extra=(("neo-epo.bin", b"bios"),))
-        with pytest.warns(UserWarning, match="Ignoring"):
-            rs = parse_mame_zip(z, allow_extra_files=True)
+        rs = parse_mame_zip(z)  # no --allow-extra-files needed
         assert len(rs.p) == 64 * 1024
 
     @pytest.mark.parametrize("name", ["game.ep1", "game.epr"])
@@ -2032,6 +2108,25 @@ class TestExtractionSafety:
         )
         assert written["p1"].name == "foo:bar-p1.bin"
         assert written["p1"].exists()
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges")
+    def test_directory_extract_replaces_symlink_without_following(self, tmp_path):
+        """A planted symlink in --out-dir must not redirect a write outside it."""
+        outside = tmp_path / "outside.txt"
+        outside.write_bytes(b"original")
+        out = tmp_path / "out"
+        out.mkdir()
+        link = out / "game-p1.bin"
+        link.symlink_to(outside)
+
+        rs = make_romset()
+        with pytest.warns(UserWarning, match="Overwriting existing file"):
+            extract_romset(rs, out, name_prefix="game", v_bank_size=1024 * 1024)
+
+        assert outside.read_bytes() == b"original"
+        assert not link.is_symlink()
+        assert link.is_file()
+        assert link.read_bytes() == rs.p
 
     @pytest.mark.parametrize(
         "prefix",

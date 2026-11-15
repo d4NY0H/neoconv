@@ -14,7 +14,7 @@ from typing import Optional
 from .constants import C_CHIP_SIZE_DEFAULT, V_BANK_SIZE
 from .exceptions import InvalidConfigurationError
 from .models import RomSet
-from .neo_format import parse_neo
+from .neo_format import parse_neo, write_bytes_atomic
 
 _INVALID_PREFIX_HINT = (
     "Pass a single filename component (for example --prefix turfmast) and use "
@@ -195,7 +195,10 @@ def extract_romset(
         fname = f"{name_prefix}-{role}{suffix}{ext}"
         p = output_dir / fname
         warn_overwriting_path(p, stacklevel=5)
-        p.write_bytes(data)
+        # Atomic replace, not p.write_bytes(): a pre-existing symlink/hardlink
+        # at the output path must be replaced instead of followed outside
+        # --out-dir.
+        write_bytes_atomic(p, data)
         written[role + suffix] = p
         return p
 

@@ -22,6 +22,23 @@ def test_enforce_latin1_byte_limit_truncates_hard():
     assert var.get() == "ABCD"
 
 
+def test_uint32_from_str_bounds():
+    assert gui._uint32_from_str("0", "Year") == 0
+    assert gui._uint32_from_str("4294967295", "Year") == 0xFFFFFFFF
+    for bad in ("-1", "4294967296", "abc", ""):
+        with pytest.raises(ValueError, match="0 and 4294967295"):
+            gui._uint32_from_str(bad, "Year")
+
+
+def test_v2_size_from_str_blank_and_bounds():
+    assert gui._v2_size_from_str("") is None
+    assert gui._v2_size_from_str("40") == 40
+    with pytest.raises(ValueError, match="V2"):
+        gui._v2_size_from_str("-1")
+    with pytest.raises(ValueError, match="V2"):
+        gui._v2_size_from_str("4294967296")
+
+
 def test_name_to_required_role_matches_known_patterns():
     assert gui._name_to_required_role("game-p1.bin") == "P"
     assert gui._name_to_required_role("game_s1.bin") == "S"
@@ -84,6 +101,7 @@ def test_pack_tab_opt_in_flags_default_off():
         tab = gui.PackTab(root)
         assert tab._allow_extra_files.get() is False
         assert tab._allow_synthetic_s.get() is False
+        assert tab._v2_size.get() == ""
     finally:
         root.destroy()
 

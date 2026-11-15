@@ -93,7 +93,7 @@ from .neo_format import (
     replace_neo_metadata,
     write_bytes_atomic,
 )
-from .pack import apply_swap_p, mame_dir_to_neo, mame_zip_to_neo
+from .pack import apply_swap_p, apply_v2_size, mame_dir_to_neo, mame_zip_to_neo
 from .swap_detect import check_m68k_vectors, detect_swap_p_needed, swap_p_banks
 from .unsupported import UNSUPPORTED_MAME_SETS, unsupported_set_reason
 from .verify import VerifyResult, verify_roundtrip
@@ -120,6 +120,7 @@ __all__ = [
     "UserCancelledError",
     "VerifyResult",
     "apply_swap_p",
+    "apply_v2_size",
     "build_neo",
     "check_m68k_vectors",
     "collect_pack_psm_roles_for_validation",

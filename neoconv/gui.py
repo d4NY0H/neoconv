@@ -42,6 +42,7 @@ from .core import (
     SwapMode,
     UserCancelledError,
     apply_swap_p,
+    apply_v2_size,
     build_neo,
     collect_pack_psm_roles_for_validation,
     collect_pack_sequence_issues,
@@ -224,6 +225,28 @@ def _optional_size_list(raw: str) -> list[int] | None:
     if not text:
         return None
     return parse_size_list(text)
+
+
+def _uint32_from_str(value: str, label: str) -> int:
+    """Parse a decimal uint32, raising a clean :class:`ValueError` when invalid."""
+    text = value.strip()
+    try:
+        number = int(text, 10)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{label} must be an integer between 0 and 4294967295."
+        ) from exc
+    if not 0 <= number <= 0xFFFFFFFF:
+        raise ValueError(f"{label} must be an integer between 0 and 4294967295.")
+    return number
+
+
+def _v2_size_from_str(value: str) -> int | None:
+    """Return ``None`` for blank V2 input; otherwise parse a uint32 byte count."""
+    text = value.strip()
+    if not text:
+        return None
+    return _uint32_from_str(text, "V2 (ADPCM-B) size")
 
 
 def _extract_size_kwargs(
@@ -1020,6 +1043,19 @@ class PackTab(ttk.Frame):
             text="Allow synthetic S  (zero-fill a missing s1; not playable)",
             variable=self._allow_synthetic_s,
         ).grid(row=5, column=0, columnspan=2, sticky="w", padx=4, pady=2)
+
+        ttk.Label(
+            opt_frame, text="V2 (ADPCM-B) size:", width=lw, anchor="w"
+        ).grid(row=6, column=0, sticky="w", padx=4, pady=(6, 2))
+        self._v2_size = tk.StringVar(value="")
+        self._v2_size.trace_add("write", lambda *_: self._schedule_validation())
+        ttk.Entry(opt_frame, textvariable=self._v2_size, width=11).grid(
+            row=6, column=1, sticky="w", padx=4, pady=(6, 2)
+        )
+        ttk.Label(
+            opt_frame,
+            text="bytes; leave empty to write all V data to V1 (V2 = 0)",
+        ).grid(row=7, column=1, sticky="w", padx=4, pady=(0, 2))
         row += 1
 
         ctrl_row = ttk.Frame(self)
@@ -1070,11 +1106,14 @@ class PackTab(ttk.Frame):
         if not src.exists():
             messagebox.showerror("Error", f"Not found: {src}"); return
         try:
-            year       = int(self._vars["year"].get())
-            ngh        = int(self._vars["ngh"].get())
-            screenshot = int(self._vars["screenshot"].get())
-        except ValueError:
-            messagebox.showerror("Error", "Year, NGH and Screenshot must be integers.")
+            year = _uint32_from_str(self._vars["year"].get(), "Year")
+            ngh = _uint32_from_str(self._vars["ngh"].get(), "NGH")
+            screenshot = _uint32_from_str(
+                self._vars["screenshot"].get(), "Screenshot"
+            )
+            v2_size = _v2_size_from_str(self._v2_size.get())
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
             return
         try:
             genre_id = resolve_genre(self._genre.get())
@@ -1138,6 +1177,7 @@ class PackTab(ttk.Frame):
                             verbose=True,
                             log=self._wbridge.post_log,
                         )
+                        romset = apply_v2_size(romset, v2_size)
                         neo_data = build_neo(romset, meta)
                     pack_warnings.extend(caught)
                 else:
@@ -1152,6 +1192,7 @@ class PackTab(ttk.Frame):
                             swap_p=swap_p,
                             diagnostic=diagnostic,
                             swap_verbose=True,
+                            v2_size=v2_size,
                             allow_extra_files=allow_extra_files,
                             allow_synthetic_s=allow_synthetic_s,
                         )
@@ -1220,13 +1261,16 @@ class PackTab(ttk.Frame):
                 self._set_status("warn", f"{k} is empty")
                 return
             try:
-                n = int(v)
-            except ValueError:
-                self._set_status("error", f"{k} must be an integer")
+                _uint32_from_str(v, k)
+            except ValueError as e:
+                self._set_status("error", str(e))
                 return
-            if n < 0:
-                self._set_status("error", f"{k} must be >= 0")
-                return
+
+        try:
+            _v2_size_from_str(self._v2_size.get())
+        except ValueError as e:
+            self._set_status("error", str(e))
+            return
 
         if not self._vars["name"].get().strip():
             self._set_status("warn", "name is empty")
@@ -1481,13 +1525,13 @@ class EditTab(ttk.Frame):
             messagebox.showerror("Error", f"File not found: {inp}")
             return
         try:
-            year = int(self._vars["year"].get())
-            ngh = int(self._vars["ngh"].get())
-            screenshot = int(self._vars["screenshot"].get())
-        except ValueError:
-            messagebox.showerror(
-                "Error", "Year, NGH and Screenshot must be integers."
+            year = _uint32_from_str(self._vars["year"].get(), "Year")
+            ngh = _uint32_from_str(self._vars["ngh"].get(), "NGH")
+            screenshot = _uint32_from_str(
+                self._vars["screenshot"].get(), "Screenshot"
             )
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
             return
         try:
             genre_id = resolve_genre(self._genre.get())
