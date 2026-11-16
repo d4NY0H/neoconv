@@ -52,6 +52,7 @@ from .core import (
     parse_mame_dir,
     parse_neo,
     parse_size_list,
+    parse_uint32,
     read_p_rom_from_zip,
     replace_neo_metadata,
     resolve_genre,
@@ -77,31 +78,19 @@ def _genre_type(value: str) -> int:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-_UINT32_MAX = 0xFFFFFFFF
-
-
 def _uint32_type(value: str) -> int:
     """argparse ``type=`` adapter for uint32 header fields.
 
-    ``--year``, ``--screenshot`` and ``--ngh`` are packed into 4-byte header
-    fields, so values outside ``0..0xFFFFFFFF`` would raise an uncaught
-    :class:`struct.error` later. Rejecting them here turns that into a normal
-    argparse usage error. Decimal input is accepted, as are explicit
-    ``0x``/``0o``/``0b`` prefixes.
+    ``--year``, ``--screenshot``, ``--ngh`` and ``--v2-size`` are packed into
+    4-byte header fields, so values outside ``0..0xFFFFFFFF`` would raise an
+    uncaught :class:`struct.error` later. Rejecting them here turns that into
+    a normal argparse usage error. Parsing is shared with the GUI via
+    :func:`neoconv.core.parse_uint32`.
     """
-    text = value.strip()
-    base = 0 if text.lower().startswith(("0x", "0o", "0b")) else 10
     try:
-        number = int(text, base)
+        return parse_uint32(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"invalid integer: {value!r}"
-        ) from exc
-    if not 0 <= number <= _UINT32_MAX:
-        raise argparse.ArgumentTypeError(
-            f"must be between 0 and {_UINT32_MAX} (got {number})"
-        )
-    return number
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _meta_from_args(args: argparse.Namespace) -> NeoMeta:
@@ -528,7 +517,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pack.add_argument(
         "--v2-size",
-        type=int,
+        type=_uint32_type,
         default=None,
         metavar="BYTES",
         help=(

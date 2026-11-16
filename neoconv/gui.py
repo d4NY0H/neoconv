@@ -50,6 +50,7 @@ from .core import (
     extract_romset,
     extract_romset_to_zip,
     parse_size_list,
+    parse_uint32,
     warn_overwriting_path,
     mame_dir_to_neo,
     mame_zip_to_neo,
@@ -228,17 +229,11 @@ def _optional_size_list(raw: str) -> list[int] | None:
 
 
 def _uint32_from_str(value: str, label: str) -> int:
-    """Parse a decimal uint32, raising a clean :class:`ValueError` when invalid."""
-    text = value.strip()
+    """Parse a uint32 field with the CLI rules; raise a labelled ValueError."""
     try:
-        number = int(text, 10)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"{label} must be an integer between 0 and 4294967295."
-        ) from exc
-    if not 0 <= number <= 0xFFFFFFFF:
-        raise ValueError(f"{label} must be an integer between 0 and 4294967295.")
-    return number
+        return parse_uint32(value)
+    except ValueError as exc:
+        raise ValueError(f"{label} {exc}.") from None
 
 
 def _v2_size_from_str(value: str) -> int | None:

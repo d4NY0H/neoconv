@@ -64,3 +64,29 @@ def resolve_genre(value: str) -> int:
             valid = ", ".join(GENRES.values())
             raise ValueError(f"unknown genre '{value}'. Valid genres: {valid}") from None
         return GENRE_BY_NAME[key]
+
+
+UINT32_MAX = 0xFFFFFFFF
+
+
+def parse_uint32(value: str) -> int:
+    """
+    Parse a uint32 header value shared by the CLI and the GUI.
+
+    Decimal input is accepted (leading zeros allowed), as are explicit
+    ``0x``/``0o``/``0b`` prefixes. Raises :class:`ValueError` with a
+    user-facing message when *value* is not an integer in ``0..0xFFFFFFFF``.
+    """
+    text = value.strip()
+    message = (
+        f"must be an integer between 0 and {UINT32_MAX} "
+        f"(decimal, or with a 0x/0o/0b prefix); got {value!r}"
+    )
+    base = 0 if text.lower().startswith(("0x", "0o", "0b")) else 10
+    try:
+        number = int(text, base)
+    except ValueError:
+        raise ValueError(message) from None
+    if not 0 <= number <= UINT32_MAX:
+        raise ValueError(message)
+    return number

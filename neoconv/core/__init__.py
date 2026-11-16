@@ -52,7 +52,9 @@ from .constants import (
     NEO_HEADER_SIZE,
     NEO_MAGIC,
     P_SWAP_SIZE,
+    UINT32_MAX,
     V_BANK_SIZE,
+    parse_uint32,
 )
 from .extract import (
     extract_neo,
@@ -104,6 +106,8 @@ __all__ = [
     "GENRE_BY_NAME",
     "GENRES",
     "resolve_genre",
+    "UINT32_MAX",
+    "parse_uint32",
     "NEO_HEADER_SIZE",
     "NEO_MAGIC",
     "P_SWAP_SIZE",

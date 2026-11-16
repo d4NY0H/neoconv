@@ -704,9 +704,32 @@ def test_cli_pack_negative_v2_size_fails_cleanly(monkeypatch, tmp_path, capsys):
     )
     with pytest.raises(SystemExit) as exc:
         cli.main()
-    assert exc.value.code == 1
-    assert "must not be negative" in capsys.readouterr().err
+    # Rejected by the shared uint32 parser as an argparse usage error.
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert "--v2-size" in err
+    assert "between 0 and 4294967295" in err
     assert not out.exists()
+
+
+def test_cli_pack_v2_size_accepts_hex(monkeypatch, tmp_path):
+    roms = tmp_path / "roms"
+    roms.mkdir()
+    (roms / "dummy.bin").write_bytes(b"x")
+    out = tmp_path / "out.neo"
+    _patch_pack_romset(monkeypatch)
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        [
+            "neoconv", "pack", str(roms), "--swap-p", "no",
+            "--v2-size", "0x28", "-o", str(out),
+        ],
+    )
+    cli.main()
+    rs = parse_neo(out.read_bytes())
+    assert (rs.v1_size, rs.v2_size) == (60, 40)
 
 
 def test_cmd_detect_swap_from_zip(monkeypatch, tmp_path, capsys):
@@ -1019,6 +1042,9 @@ def test_uint32_parser_accepts_bounds():
         ["edit", "in.neo", "--screenshot", "-1"],
         ["edit", "in.neo", "--ngh", "4294967296"],
         ["edit", "in.neo", "--year", "not-a-number"],
+        ["pack", "in.zip", "--v2-size", "4294967296"],
+        ["pack", "in.zip", "--v2-size", "0x100000000"],
+        ["pack", "in.zip", "--v2-size", "12abc"],
     ],
 )
 def test_uint32_cli_rejects_out_of_range(monkeypatch, capsys, argv):

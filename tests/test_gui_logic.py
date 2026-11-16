@@ -30,9 +30,33 @@ def test_uint32_from_str_bounds():
             gui._uint32_from_str(bad, "Year")
 
 
+def test_uint32_from_str_accepts_cli_prefixes():
+    assert gui._uint32_from_str("0xFFFFFFFF", "Year") == 0xFFFFFFFF
+    assert gui._uint32_from_str(" 0o17 ", "NGH") == 0o17
+    assert gui._uint32_from_str("0b101", "Screenshot") == 5
+    assert gui._uint32_from_str("007", "NGH") == 7
+    with pytest.raises(ValueError, match="Year must be an integer"):
+        gui._uint32_from_str("0x100000000", "Year")
+
+
+def test_gui_and_cli_share_uint32_rules():
+    import argparse
+
+    from neoconv import cli
+
+    for good in ("0", "4294967295", "0x10", "0o10", "0b10", "010"):
+        assert gui._uint32_from_str(good, "Year") == cli._uint32_type(good)
+    for bad in ("-1", "4294967296", "0x", "1.5", "abc", ""):
+        with pytest.raises(ValueError):
+            gui._uint32_from_str(bad, "Year")
+        with pytest.raises(argparse.ArgumentTypeError):
+            cli._uint32_type(bad)
+
+
 def test_v2_size_from_str_blank_and_bounds():
     assert gui._v2_size_from_str("") is None
     assert gui._v2_size_from_str("40") == 40
+    assert gui._v2_size_from_str("0x28") == 40
     with pytest.raises(ValueError, match="V2"):
         gui._v2_size_from_str("-1")
     with pytest.raises(ValueError, match="V2"):

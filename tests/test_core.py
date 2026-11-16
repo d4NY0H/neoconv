@@ -46,6 +46,7 @@ from neoconv.core import (
     parse_mame_zip,
     parse_neo,
     parse_neo_header_metadata,
+    parse_uint32,
     read_p_rom_from_zip,
     replace_neo_metadata,
     swap_p_banks,
@@ -2435,3 +2436,28 @@ class TestPOnlyZipReader:
         )
         with pytest.raises(InvalidRomLayoutError, match="Duplicate ROM role 'P'"):
             parse_mame_zip(z)
+
+
+class TestParseUint32:
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("0", 0),
+            ("4294967295", 0xFFFFFFFF),
+            (" 1994 ", 1994),
+            ("0x0FFFFFFFF", 0xFFFFFFFF),
+            ("0XFF", 0xFF),
+            ("0o777", 0o777),
+            ("0b1010", 10),
+            ("0042", 42),
+        ],
+    )
+    def test_accepts(self, text, expected):
+        assert parse_uint32(text) == expected
+
+    @pytest.mark.parametrize(
+        "text", ["", "-1", "4294967296", "0x100000000", "abc", "0x", "1e3", "-0x1"]
+    )
+    def test_rejects(self, text):
+        with pytest.raises(ValueError, match="between 0 and 4294967295"):
+            parse_uint32(text)

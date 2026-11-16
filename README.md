@@ -296,6 +296,8 @@ neoconv pack ./roms/ --name "Test" --diagnostic --out test.neo
 | `--allow-synthetic-s` | off | Replace a missing `s1` with a zero-filled placeholder. The result is **not playable** on TerraOnion / MiSTer hardware (missing or corrupt text layer); by default a missing S ROM is an error. |
 | `--diagnostic` | off | Warn on unrecognized filenames (informational only; it does not override any failure) |
 
+**uint32 values** (`--year`, `--ngh`, `--screenshot`, `--v2-size`) accept `0`–`4294967295` as decimal or with an explicit `0x`/`0o`/`0b` prefix (e.g. `0x28`). Out-of-range or malformed values are rejected as usage errors. The GUI fields (Year, NGH, Screenshot, V2 (ADPCM-B) size) use the same rules.
+
 **Genres** (`--genre` name or numeric id):
 
 | ID | Name |
@@ -337,6 +339,8 @@ neoconv edit game.neo --genre Fighting --year 1994 --ngh 65 --out game_fixed.neo
 | `--genre`, `-g` | — | Genre name or **uint32** id (same set as `pack`) |
 | `--ngh` | — | **uint32** NGH number |
 | `--screenshot` | — | **uint32** screenshot index |
+
+uint32 values accept the same decimal or `0x`/`0o`/`0b`-prefixed input as `pack`.
 
 ---
 
