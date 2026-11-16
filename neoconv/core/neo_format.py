@@ -346,7 +346,12 @@ def write_bytes_atomic(path: Path | str, data: bytes) -> None:
     tmp = parent / f".neoconv-{secrets.token_hex(8)}.tmp"
     fd: Optional[int] = None
     try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        # O_BINARY (Windows only) keeps the fd out of text mode; without it
+        # every 0x0A byte would be written as 0x0D 0x0A. Same as stdlib tempfile.
+        flags = (
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+        )
+        fd = os.open(tmp, flags, 0o666)
         if existing_mode is not None:
             try:
                 if hasattr(os, "fchmod"):

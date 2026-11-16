@@ -2248,6 +2248,33 @@ class TestWriteBytesAtomicHardening:
         write_bytes_atomic(p, b"beta")
         assert p.read_bytes() == b"beta"
 
+    def test_writes_exact_bytes_without_newline_translation(self, tmp_path):
+        p = tmp_path / "binary.neo"
+        payload = b"\n\r\n\x00"
+        write_bytes_atomic(p, payload)
+        assert p.read_bytes() == payload
+
+    def test_opens_temp_file_with_o_binary(self, monkeypatch, tmp_path):
+        # Simulate the Windows-only O_BINARY flag so the flag wiring is
+        # checked on every platform, not just where it changes behavior.
+        real_open = os.open
+        seen: list[int] = []
+        if hasattr(os, "O_BINARY"):
+            binary_flag, strip = os.O_BINARY, 0
+        else:
+            binary_flag = strip = 0x40000000
+            monkeypatch.setattr(os, "O_BINARY", binary_flag, raising=False)
+
+        def _open(path, flags, mode=0o777, *args, **kwargs):
+            seen.append(flags)
+            return real_open(path, flags & ~strip, mode, *args, **kwargs)
+
+        monkeypatch.setattr("neoconv.core.neo_format.os.open", _open)
+        p = tmp_path / "flags.neo"
+        write_bytes_atomic(p, b"\n")
+        assert seen and seen[0] & binary_flag
+        assert p.read_bytes() == b"\n"
+
     def test_preserves_existing_file_mode(self, tmp_path):
         p = tmp_path / "existing.neo"
         p.write_bytes(b"old")
