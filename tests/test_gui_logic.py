@@ -22,6 +22,47 @@ def test_enforce_latin1_byte_limit_truncates_hard():
     assert var.get() == "ABCD"
 
 
+def test_uint32_from_str_bounds():
+    assert gui._uint32_from_str("0", "Year") == 0
+    assert gui._uint32_from_str("4294967295", "Year") == 0xFFFFFFFF
+    for bad in ("-1", "4294967296", "abc", ""):
+        with pytest.raises(ValueError, match="0 and 4294967295"):
+            gui._uint32_from_str(bad, "Year")
+
+
+def test_uint32_from_str_accepts_cli_prefixes():
+    assert gui._uint32_from_str("0xFFFFFFFF", "Year") == 0xFFFFFFFF
+    assert gui._uint32_from_str(" 0o17 ", "NGH") == 0o17
+    assert gui._uint32_from_str("0b101", "Screenshot") == 5
+    assert gui._uint32_from_str("007", "NGH") == 7
+    with pytest.raises(ValueError, match="Year must be an integer"):
+        gui._uint32_from_str("0x100000000", "Year")
+
+
+def test_gui_and_cli_share_uint32_rules():
+    import argparse
+
+    from neoconv import cli
+
+    for good in ("0", "4294967295", "0x10", "0o10", "0b10", "010"):
+        assert gui._uint32_from_str(good, "Year") == cli._uint32_type(good)
+    for bad in ("-1", "4294967296", "0x", "1.5", "abc", ""):
+        with pytest.raises(ValueError):
+            gui._uint32_from_str(bad, "Year")
+        with pytest.raises(argparse.ArgumentTypeError):
+            cli._uint32_type(bad)
+
+
+def test_v2_size_from_str_blank_and_bounds():
+    assert gui._v2_size_from_str("") is None
+    assert gui._v2_size_from_str("40") == 40
+    assert gui._v2_size_from_str("0x28") == 40
+    with pytest.raises(ValueError, match="V2"):
+        gui._v2_size_from_str("-1")
+    with pytest.raises(ValueError, match="V2"):
+        gui._v2_size_from_str("4294967296")
+
+
 def test_name_to_required_role_matches_known_patterns():
     assert gui._name_to_required_role("game-p1.bin") == "P"
     assert gui._name_to_required_role("game_s1.bin") == "S"
@@ -58,6 +99,35 @@ def test_scan_pack_preflight_detects_v_gap(tmp_path):
     roles, issues = gui._scan_pack_preflight(tmp_path)
     assert roles == {"P", "S", "M"}
     assert any("V2" in i for i in issues)
+
+
+def test_scan_pack_preflight_synthetic_s_is_off_by_default(tmp_path):
+    (tmp_path / "269-p1.p1").write_bytes(b"p")
+    (tmp_path / "269-m1.m1").write_bytes(b"m")
+    (tmp_path / "269-v1.v1").write_bytes(b"v")
+    (tmp_path / "269-c1r.c1").write_bytes(b"c")
+    (tmp_path / "269-c2r.c2").write_bytes(b"c")
+
+    roles, _ = gui._scan_pack_preflight(tmp_path)
+    assert "S" not in roles
+
+    roles, _ = gui._scan_pack_preflight(tmp_path, allow_synthetic_s=True)
+    assert "S" in roles
+
+
+def test_pack_tab_opt_in_flags_default_off():
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:  # headless CI / no display
+        pytest.skip(f"Tk display unavailable: {exc}")
+    root.withdraw()
+    try:
+        tab = gui.PackTab(root)
+        assert tab._allow_extra_files.get() is False
+        assert tab._allow_synthetic_s.get() is False
+        assert tab._v2_size.get() == ""
+    finally:
+        root.destroy()
 
 
 def test_c_chip_size_from_str_default_label():

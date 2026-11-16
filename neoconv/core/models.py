@@ -64,11 +64,20 @@ class NeoMeta:
             md5_m = hashlib.md5(romset.m).hexdigest()
             md5_v = hashlib.md5(romset.v).hexdigest()
             md5_c = hashlib.md5(romset.c).hexdigest()
+            v1_size, v2_size = romset.v_sizes()
+            v_split_line = (
+                f"  V ROM split  : V1 {v1_size:,} bytes (ADPCM-A) + "
+                f"V2 {v2_size:,} bytes (ADPCM-B)"
+            )
             lines += [
                 f"  P ROM        : {len(romset.p):>10,} bytes  ({len(romset.p)/1024/1024:.3f} MB)",
                 f"  S ROM        : {len(romset.s):>10,} bytes  ({len(romset.s)/1024:.0f} KB)",
                 f"  M ROM        : {len(romset.m):>10,} bytes  ({len(romset.m)/1024:.0f} KB)",
                 f"  V ROM        : {v_total:>10,} bytes  ({v_total/1024/1024:.3f} MB)",
+            ]
+            if v2_size:
+                lines.append(v_split_line)
+            lines += [
                 f"  C ROM        : {len(romset.c):>10,} bytes  ({len(romset.c)/1024/1024:.3f} MB)",
                 f"  Total        : {total:>10,} bytes  ({total/1024/1024:.2f} MB)",
                 f"  P ROM MD5    : {md5_p}",
@@ -90,6 +99,44 @@ class RomSet:
     v: bytes = b""  # all V data concatenated (V1 + V2 + ...)
     c: bytes = b""  # all C data interleaved (as stored in .neo)
     meta: NeoMeta = field(default_factory=NeoMeta)
+    # Original .neo header V1/V2 split. ``None`` means "not known" (for example
+    # a RomSet assembled from MAME input); header writing then falls back to the
+    # legacy layout (all V in the V1 field, V2 = 0). The hardware uses V1 for
+    # ADPCM-A and V2 for ADPCM-B, so preserving an existing split matters.
+    v1_size: Optional[int] = None
+    v2_size: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if self.v1_size is None and self.v2_size is None:
+            return
+        if self.v1_size is None:
+            raise InvalidConfigurationError(
+                "V1 size is unknown but V2 size is set; provide both or neither.",
+                hint="The .neo header needs both V1 and V2 size fields.",
+            )
+        v2 = 0 if self.v2_size is None else self.v2_size
+        if self.v1_size < 0 or v2 < 0:
+            raise InvalidConfigurationError(
+                f"V1 ({self.v1_size:,}) and V2 ({v2:,}) sizes must not be negative."
+            )
+        if self.v1_size + v2 != len(self.v):
+            raise InvalidConfigurationError(
+                f"V1 ({self.v1_size:,} bytes) + V2 ({v2:,} bytes) = "
+                f"{self.v1_size + v2:,} bytes does not match the V ROM size "
+                f"({len(self.v):,} bytes).",
+                hint="The header V1/V2 split must add up to the merged V data length.",
+            )
+
+    def v_sizes(self) -> tuple[int, int]:
+        """
+        Return the ``(v1_size, v2_size)`` byte split for header writing.
+
+        When the original split is unknown, returns ``(len(v), 0)``: the legacy
+        neoconv layout with all V data in the V1 field and V2 empty.
+        """
+        if self.v1_size is None:
+            return len(self.v), 0
+        return self.v1_size, 0 if self.v2_size is None else self.v2_size
 
     def p_chips(
         self,

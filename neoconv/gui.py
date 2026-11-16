@@ -42,6 +42,7 @@ from .core import (
     SwapMode,
     UserCancelledError,
     apply_swap_p,
+    apply_v2_size,
     build_neo,
     collect_pack_psm_roles_for_validation,
     collect_pack_sequence_issues,
@@ -49,6 +50,7 @@ from .core import (
     extract_romset,
     extract_romset_to_zip,
     parse_size_list,
+    parse_uint32,
     warn_overwriting_path,
     mame_dir_to_neo,
     mame_zip_to_neo,
@@ -226,6 +228,22 @@ def _optional_size_list(raw: str) -> list[int] | None:
     return parse_size_list(text)
 
 
+def _uint32_from_str(value: str, label: str) -> int:
+    """Parse a uint32 field with the CLI rules; raise a labelled ValueError."""
+    try:
+        return parse_uint32(value)
+    except ValueError as exc:
+        raise ValueError(f"{label} {exc}.") from None
+
+
+def _v2_size_from_str(value: str) -> int | None:
+    """Return ``None`` for blank V2 input; otherwise parse a uint32 byte count."""
+    text = value.strip()
+    if not text:
+        return None
+    return _uint32_from_str(text, "V2 (ADPCM-B) size")
+
+
 def _extract_size_kwargs(
     c_combo_label: str,
     v_combo_label: str,
@@ -312,11 +330,17 @@ def _list_pack_input_filenames(src: Path) -> list[str]:
     return []
 
 
-def _scan_pack_preflight(src: Path) -> tuple[set[str], list[str]]:
+def _scan_pack_preflight(
+    src: Path,
+    *,
+    allow_synthetic_s: bool = False,
+) -> tuple[set[str], list[str]]:
     names = _list_pack_input_filenames(src)
     if not names:
         return set(), []
-    roles = collect_pack_psm_roles_for_validation(names)
+    roles = collect_pack_psm_roles_for_validation(
+        names, allow_synthetic_s=allow_synthetic_s
+    )
     issues = collect_pack_sequence_issues(names)
     return roles, issues
 
@@ -997,6 +1021,36 @@ class PackTab(ttk.Frame):
             text="Diagnostic mode  (log warnings for unrecognized files)",
             variable=self._diagnostic,
         ).grid(row=3, column=0, columnspan=2, sticky="w", padx=4, pady=(6, 2))
+
+        self._allow_extra_files = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            opt_frame,
+            text="Allow extra files  (ignore unrecognized files instead of failing)",
+            variable=self._allow_extra_files,
+        ).grid(row=4, column=0, columnspan=2, sticky="w", padx=4, pady=2)
+
+        self._allow_synthetic_s = tk.BooleanVar(value=False)
+        self._allow_synthetic_s.trace_add(
+            "write", lambda *_: self._schedule_validation()
+        )
+        ttk.Checkbutton(
+            opt_frame,
+            text="Allow synthetic S  (zero-fill a missing s1; not playable)",
+            variable=self._allow_synthetic_s,
+        ).grid(row=5, column=0, columnspan=2, sticky="w", padx=4, pady=2)
+
+        ttk.Label(
+            opt_frame, text="V2 (ADPCM-B) size:", width=lw, anchor="w"
+        ).grid(row=6, column=0, sticky="w", padx=4, pady=(6, 2))
+        self._v2_size = tk.StringVar(value="")
+        self._v2_size.trace_add("write", lambda *_: self._schedule_validation())
+        ttk.Entry(opt_frame, textvariable=self._v2_size, width=11).grid(
+            row=6, column=1, sticky="w", padx=4, pady=(6, 2)
+        )
+        ttk.Label(
+            opt_frame,
+            text="bytes; leave empty to write all V data to V1 (V2 = 0)",
+        ).grid(row=7, column=1, sticky="w", padx=4, pady=(0, 2))
         row += 1
 
         ctrl_row = ttk.Frame(self)
@@ -1047,11 +1101,14 @@ class PackTab(ttk.Frame):
         if not src.exists():
             messagebox.showerror("Error", f"Not found: {src}"); return
         try:
-            year       = int(self._vars["year"].get())
-            ngh        = int(self._vars["ngh"].get())
-            screenshot = int(self._vars["screenshot"].get())
-        except ValueError:
-            messagebox.showerror("Error", "Year, NGH and Screenshot must be integers.")
+            year = _uint32_from_str(self._vars["year"].get(), "Year")
+            ngh = _uint32_from_str(self._vars["ngh"].get(), "NGH")
+            screenshot = _uint32_from_str(
+                self._vars["screenshot"].get(), "Screenshot"
+            )
+            v2_size = _v2_size_from_str(self._v2_size.get())
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
             return
         try:
             genre_id = resolve_genre(self._genre.get())
@@ -1069,6 +1126,8 @@ class PackTab(ttk.Frame):
         )
         swap_p = SwapMode(self._swap_p.get())  # "no" | "auto" | "yes"
         diagnostic = self._diagnostic.get()
+        allow_extra_files = self._allow_extra_files.get()
+        allow_synthetic_s = self._allow_synthetic_s.get()
         self._log.clear()
         self._wbridge.cancel_pump()
         self._wbridge.clear_queue()
@@ -1095,7 +1154,12 @@ class PackTab(ttk.Frame):
                     # Parse once, then apply_swap_p (single detect pass) and build.
                     with warnings.catch_warnings(record=True) as wprobe:
                         warnings.simplefilter("always")
-                        rs_probe = fn_parse(src, diagnostic=diagnostic)
+                        rs_probe = fn_parse(
+                            src,
+                            diagnostic=diagnostic,
+                            allow_extra_files=allow_extra_files,
+                            allow_synthetic_s=allow_synthetic_s,
+                        )
                     pack_warnings.extend(wprobe)
                     if self._cancel_event.is_set():
                         raise UserCancelledError("Operation cancelled by user.")
@@ -1108,6 +1172,7 @@ class PackTab(ttk.Frame):
                             verbose=True,
                             log=self._wbridge.post_log,
                         )
+                        romset = apply_v2_size(romset, v2_size)
                         neo_data = build_neo(romset, meta)
                     pack_warnings.extend(caught)
                 else:
@@ -1122,6 +1187,9 @@ class PackTab(ttk.Frame):
                             swap_p=swap_p,
                             diagnostic=diagnostic,
                             swap_verbose=True,
+                            v2_size=v2_size,
+                            allow_extra_files=allow_extra_files,
+                            allow_synthetic_s=allow_synthetic_s,
                         )
                     pack_warnings.extend(caught)
 
@@ -1188,13 +1256,16 @@ class PackTab(ttk.Frame):
                 self._set_status("warn", f"{k} is empty")
                 return
             try:
-                n = int(v)
-            except ValueError:
-                self._set_status("error", f"{k} must be an integer")
+                _uint32_from_str(v, k)
+            except ValueError as e:
+                self._set_status("error", str(e))
                 return
-            if n < 0:
-                self._set_status("error", f"{k} must be >= 0")
-                return
+
+        try:
+            _v2_size_from_str(self._v2_size.get())
+        except ValueError as e:
+            self._set_status("error", str(e))
+            return
 
         if not self._vars["name"].get().strip():
             self._set_status("warn", "name is empty")
@@ -1209,14 +1280,19 @@ class PackTab(ttk.Frame):
             self._set_status("error", str(e))
             return
 
-        src_key = self._source_key(src)
+        src_key = self._source_key(src) + (self._allow_synthetic_s.get(),)
         if src_key != self._roles_src_key:
             self._roles_src_key = src_key
             self._roles_missing = None
             self._roles_sequence_issues = None
             self._roles_scan_error = None
             self._roles_scan_token += 1
-            self._start_roles_scan(src, src_key, self._roles_scan_token)
+            self._start_roles_scan(
+                src,
+                src_key,
+                self._roles_scan_token,
+                allow_synthetic_s=self._allow_synthetic_s.get(),
+            )
             self._set_status("warn", "inspecting input roles...")
             return
 
@@ -1252,7 +1328,14 @@ class PackTab(ttk.Frame):
         st = src.stat()
         return (str(src.resolve()), src.is_dir(), st.st_mtime_ns, st.st_size)
 
-    def _start_roles_scan(self, src: Path, src_key: tuple, token: int) -> None:
+    def _start_roles_scan(
+        self,
+        src: Path,
+        src_key: tuple,
+        token: int,
+        *,
+        allow_synthetic_s: bool = False,
+    ) -> None:
         self._roles_scan_running_token = token
         self._wbridge.start_pump(
             lambda: self._is_running or self._roles_scan_running_token is not None
@@ -1263,7 +1346,9 @@ class PackTab(ttk.Frame):
             sequence_issues: list[str] = []
             error: str | None = None
             try:
-                roles, sequence_issues = _scan_pack_preflight(src)
+                roles, sequence_issues = _scan_pack_preflight(
+                    src, allow_synthetic_s=allow_synthetic_s
+                )
                 missing = [r for r in ("P", "S", "M") if r not in roles]
             except (OSError, ValueError) as e:
                 error = str(e)
@@ -1435,13 +1520,13 @@ class EditTab(ttk.Frame):
             messagebox.showerror("Error", f"File not found: {inp}")
             return
         try:
-            year = int(self._vars["year"].get())
-            ngh = int(self._vars["ngh"].get())
-            screenshot = int(self._vars["screenshot"].get())
-        except ValueError:
-            messagebox.showerror(
-                "Error", "Year, NGH and Screenshot must be integers."
+            year = _uint32_from_str(self._vars["year"].get(), "Year")
+            ngh = _uint32_from_str(self._vars["ngh"].get(), "NGH")
+            screenshot = _uint32_from_str(
+                self._vars["screenshot"].get(), "Screenshot"
             )
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
             return
         try:
             genre_id = resolve_genre(self._genre.get())

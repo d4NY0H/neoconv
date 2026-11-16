@@ -34,6 +34,12 @@ class InvalidRomLayoutError(NeoConvError):
     code = "rom_layout"
 
 
+class UnsupportedRomSetError(NeoConvError):
+    """Known MAME set needs layout/decrypt support that neoconv does not have yet."""
+
+    code = "unsupported_rom_set"
+
+
 class InvalidConfigurationError(NeoConvError):
     """Operation parameters are invalid (extract chip/bank size, P-ROM swap rules)."""
 

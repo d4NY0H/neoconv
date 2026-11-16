@@ -5,6 +5,7 @@ from neoconv.core import (
     InvalidNeoError,
     InvalidRomLayoutError,
     NeoConvError,
+    UnsupportedRomSetError,
     UserCancelledError,
 )
 
@@ -20,4 +21,5 @@ def test_neoconv_error_hint_and_code():
 def test_subclass_codes():
     assert InvalidNeoError("x").code == "invalid_neo"
     assert InvalidRomLayoutError("x").code == "rom_layout"
+    assert UnsupportedRomSetError("x").code == "unsupported_rom_set"
     assert UserCancelledError("x").code == "cancelled"
