@@ -1708,6 +1708,30 @@ class TestFailClosedPack:
         rs = parse_mame_zip(z)  # no --allow-extra-files needed
         assert len(rs.p) == 64 * 1024
 
+    @pytest.mark.parametrize(
+        "name", ["265-v1d.v1d", "game.v1a", "game-v2b.bin", "v3c"]
+    )
+    def test_allow_extra_files_rejects_lettered_v_names(self, tmp_path, name):
+        """Lettered V names (``v1d``, ``v1a``) are V data, not disposable extras."""
+        z = tmp_path / "lettered_v_fixture.zip"
+        write_complete_mame_zip(z, extra=((name, make_rom(1024, 0x55)),))
+        with pytest.raises(
+            InvalidRomLayoutError, match="look like Neo Geo ROM data"
+        ) as exc:
+            parse_mame_zip(z, allow_extra_files=True)
+        assert name in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "name",
+        ["readme.txt", "README", "game.dat", "notes.nfo", "vga.txt", "info.v"],
+    )
+    def test_non_rom_extras_still_allowed_with_flag(self, tmp_path, name):
+        z = tmp_path / "non_rom_extra.zip"
+        write_complete_mame_zip(z, extra=((name, b"x"),))
+        with pytest.warns(UserWarning, match="Ignoring"):
+            rs = parse_mame_zip(z, allow_extra_files=True)
+        assert len(rs.v) == 128 * 1024
+
     @pytest.mark.parametrize("name", ["game.ep1", "game.epr"])
     def test_ep_role_extras_remain_rom_like(self, tmp_path, name):
         z = tmp_path / "set.zip"

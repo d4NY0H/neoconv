@@ -286,11 +286,11 @@ _MAX_EXTRA_FILES_IN_MESSAGE = 12
 # Recognized-but-unmapped ROM naming patterns. ``--allow-extra-files`` must
 # never drop these because doing so can truncate P/V/C data.
 _RE_ROM_ROLE_SUFFIX = re.compile(
-    r"\.(?:p[0-9]+[a-z]*|sp[0-9]+[a-z]*|ep[0-9a-z]*|s[1-9]|m[1-9]|v[0-9]+|c[0-9]+[a-z]*|neo-sma)$",
+    r"\.(?:p[0-9]+[a-z]*|sp[0-9]+[a-z]*|ep[0-9a-z]*|s[1-9]|m[1-9]|v[0-9]+[a-z]*|c[0-9]+[a-z]*|neo-sma)$",
     re.IGNORECASE,
 )
 _RE_ROM_ROLE_IN_STEM = re.compile(
-    r"(?:^|[-_])(?:p[0-9]+[a-z]*|sp[0-9]+[a-z]*|ep[0-9]+|epr|s[1-9]|m[1-9]|v[0-9]+|c[0-9]+[a-z]*)$",
+    r"(?:^|[-_])(?:p[0-9]+[a-z]*|sp[0-9]+[a-z]*|ep[0-9]+|epr|s[1-9]|m[1-9]|v[0-9]+[a-z]*|c[0-9]+[a-z]*)$",
     re.IGNORECASE,
 )
 _ROM_DATA_SUFFIXES = frozenset({".bin", ".rom"})
