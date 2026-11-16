@@ -4,6 +4,8 @@ Unit tests for neoconv.core
 Run with:  python -m pytest tests/ -v
 """
 
+from __future__ import annotations
+
 import hashlib
 import io
 import os
